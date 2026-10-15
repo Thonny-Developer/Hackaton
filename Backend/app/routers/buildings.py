@@ -20,6 +20,7 @@ from app.schemas import (
 )
 from app.security import AdminUser, EditorUser
 from app.services import storage
+from app.services.geo import plan_corners
 from app.services.graph_cache import bump_graph_version, get_graph
 from app.services.importer import import_graph
 
@@ -29,6 +30,14 @@ router = APIRouter(prefix="/buildings", tags=["buildings"])
 def floor_out(f: Floor) -> FloorOut:
     out = FloorOut.model_validate(f)
     out.plan_url = storage.plan_url(f.id, f.plan_object_key)
+    out.plan_corners = plan_corners(f)
+    return out
+
+
+def node_out(n: Node, g) -> NodeOut:
+    out = NodeOut.model_validate(n)
+    if g and n.id in g.nodes:
+        out.geo = g.node_geo(g.nodes[n.id])
     return out
 
 
@@ -117,7 +126,7 @@ async def export_graph(building_id: int, session: SessionDep):
     return GraphExport(
         building=BuildingOut.model_validate(b),
         floors=[floor_out(f) for f in floors],
-        nodes=[NodeOut.model_validate(n) for n in nodes],
+        nodes=[node_out(n, g) for n in nodes],
         edges=[edge_out(e, g) for e in edges],
     )
 

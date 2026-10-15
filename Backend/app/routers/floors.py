@@ -8,10 +8,11 @@ from sqlalchemy import or_, select
 from app.config import get_settings
 from app.deps import SessionDep, get_or_404
 from app.models import Edge, Floor, Node, Obstacle
-from app.routers.buildings import edge_out, floor_out
-from app.schemas import FloorDetail, FloorOut, FloorUpdate, NodeOut, ObstacleOut
+from app.routers.buildings import edge_out, floor_out, node_out
+from app.schemas import FloorDetail, FloorOut, FloorUpdate, ObstacleOut
 from app.security import EditorUser
 from app.services import storage
+from app.services.geojson import floor_geojson
 from app.services.graph_cache import bump_graph_version, get_graph
 
 router = APIRouter(prefix="/floors", tags=["floors"])
@@ -39,10 +40,24 @@ async def get_floor(floor_id: int, session: SessionDep):
     base = floor_out(f)
     return FloorDetail(
         **base.model_dump(),
-        nodes=[NodeOut.model_validate(n) for n in nodes],
+        nodes=[node_out(n, g) for n in nodes],
         edges=[edge_out(e, g) for e in edges],
         obstacles=[ObstacleOut.model_validate(o) for o in obstacles],
     )
+
+
+@router.get("/{floor_id}/geojson", summary="Этаж в GeoJSON для Mapbox (узлы, переходы, препятствия)",
+            responses={409: {"description": "Этаж не привязан к карте"}})
+async def get_floor_geojson(floor_id: int, session: SessionDep) -> dict:
+    """FeatureCollection: узлы точками (`properties.kind = node`), переходы внутри этажа линиями
+    (`kind = edge`). Перекрытые препятствиями объекты помечены `blocked: true`.
+    Подставляется в Mapbox как `{type: "geojson", data: ...}`."""
+    f = await get_or_404(session, Floor, floor_id, "Этаж")
+    if f.geo_origin_lat is None or f.geo_origin_lon is None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Этаж не привязан к карте: задайте geo_origin_lat, geo_origin_lon и geo_rotation_deg")
+    g = await get_graph(session, f.building_id)
+    return floor_geojson(g, floor_id, datetime.now(UTC))
 
 
 @router.patch("/{floor_id}", response_model=FloorOut)
@@ -54,7 +69,8 @@ async def update_floor(floor_id: int, data: FloorUpdate, session: SessionDep, _:
     ):
         raise HTTPException(status.HTTP_409_CONFLICT, f"Этаж с level={patch['level']} уже есть")
     for k, v in patch.items():
-        if v is not None:
+        # Привязку к карте можно сбросить через null, остальные поля обязательные
+        if v is not None or k in ("geo_origin_lat", "geo_origin_lon"):
             setattr(f, k, v)
     await bump_graph_version(session, f.building_id)
     await session.commit()

@@ -91,6 +91,9 @@ class FloorBase(BaseModel):
     name: str | None = Field(None, max_length=100)
     meters_per_px: float = Field(0.05, gt=0, le=100, description="Сколько метров в одном пикселе схемы")
     height_m: float = Field(3.5, gt=0, le=50, description="Высота этажа, нужна для длины лестниц и лифтов")
+    geo_origin_lat: Lat | None = Field(None, description="Широта левого верхнего угла схемы")
+    geo_origin_lon: Lon | None = Field(None, description="Долгота левого верхнего угла схемы")
+    geo_rotation_deg: float = Field(0, ge=-360, le=360, description="Поворот схемы по часовой стрелке от севера")
 
 
 class FloorCreate(FloorBase):
@@ -102,6 +105,9 @@ class FloorUpdate(BaseModel):
     name: str | None = Field(None, max_length=100)
     meters_per_px: float | None = Field(None, gt=0, le=100)
     height_m: float | None = Field(None, gt=0, le=50)
+    geo_origin_lat: Lat | None = None
+    geo_origin_lon: Lon | None = None
+    geo_rotation_deg: float | None = Field(None, ge=-360, le=360)
 
 
 class FloorOut(ORM, FloorBase):
@@ -110,6 +116,10 @@ class FloorOut(ORM, FloorBase):
     plan_url: str | None = None
     plan_width_px: int | None
     plan_height_px: int | None
+    plan_corners: list[list[float]] | None = Field(
+        None, description="Углы схемы [[lon, lat] x4]: левый верхний, правый верхний, правый нижний, левый нижний. "
+                          "Готовые coordinates для Mapbox image source"
+    )
 
 
 # ---------- Nodes / Edges ----------
@@ -147,6 +157,7 @@ class NodeOut(ORM, NodeBase):
     id: int
     building_id: int
     floor_id: int
+    geo: list[float] | None = Field(None, description="[lon, lat] по привязке этажа к карте; null, если этаж не привязан")
 
 
 class EdgeBase(BaseModel):
@@ -298,6 +309,7 @@ class SearchHit(BaseModel):
     ref: str | None
     x: float
     y: float
+    geo: list[float] | None = Field(None, description="[lon, lat] по привязке этажа к карте; null, если этаж не привязан")
 
 
 # ---------- Profiles / Route ----------
@@ -327,6 +339,7 @@ class RouteNode(BaseModel):
     ref: str | None
     x: float
     y: float
+    geo: list[float] | None = Field(None, description="[lon, lat] по привязке этажа к карте; null, если этаж не привязан")
 
 
 class RouteEdge(BaseModel):
@@ -380,3 +393,5 @@ class RouteResponse(BaseModel):
     steps: list[RouteStep] = Field(default_factory=list)
     warnings: list[RouteIssue] = Field(default_factory=list)
     reason: RouteReason | None = None
+    geojson: dict | None = Field(None, description="FeatureCollection для Mapbox: LineString на каждый этаж маршрута "
+                                                   "(properties.level) и точки start/finish. null, если этажи не привязаны")

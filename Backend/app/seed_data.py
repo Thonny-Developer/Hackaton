@@ -13,10 +13,13 @@
 
 DEMO_NAME = "Колледж Sapa (демо)"
 
+# Привязка к карте: левый верхний угол схемы на местности, схема ориентирована на север.
+# Координаты входов не задаются вручную, они вычисляются из этой привязки.
+_GEO = {"geo_origin_lat": 51.09115, "geo_origin_lon": 71.41780, "geo_rotation_deg": 0}
+
 _floors = [
-    {"key": "f1", "level": 1, "name": "1 этаж", "meters_per_px": 0.05, "height_m": 3.6},
-    {"key": "f2", "level": 2, "name": "2 этаж", "meters_per_px": 0.05, "height_m": 3.6},
-    {"key": "f3", "level": 3, "name": "3 этаж", "meters_per_px": 0.05, "height_m": 3.6},
+    {"key": f"f{lvl}", "level": lvl, "name": f"{lvl} этаж", "meters_per_px": 0.05, "height_m": 3.6, **_GEO}
+    for lvl in (1, 2, 3)
 ]
 
 
@@ -59,10 +62,9 @@ def build_demo() -> dict:
 
     # 1 этаж: входы, холл, библиотека, туалет
     nodes += [
-        _n("ent_main", "f1", "entrance", 500, 590, "Главный вход", lat=51.09085, lon=71.41810),
+        _n("ent_main", "f1", "entrance", 500, 590, "Главный вход"),
         _n("lobby", "f1", "corridor", 500, 480, "Холл"),
-        _n("ent_side", "f1", "entrance", 990, 480, "Боковой вход (пандус)", lat=51.09098, lon=71.41862,
-           is_accessible_entrance=True),
+        _n("ent_side", "f1", "entrance", 990, 480, "Боковой вход (пандус)", is_accessible_entrance=True),
         _n("side_hall", "f1", "corridor", 900, 480),
         _n("r101", "f1", "room", 100, 150, "Аудитория", "101"),
         _n("r105", "f1", "room", 500, 150, "Библиотека", "105"),
@@ -115,7 +117,7 @@ def build_demo() -> dict:
         "name": DEMO_NAME,
         "address": "Астана, демо-адрес",
         "description": "Демонстрационное здание: 3 этажа, лифт, лестница, пандус, подъёмник",
-        "lat": 51.09092,
-        "lon": 71.41835,
+        "lat": 51.0910151,
+        "lon": 71.418158,
         "graph": {"floors": _floors, "nodes": nodes, "edges": edges},
     }

@@ -47,7 +47,8 @@ async def import_graph(session: AsyncSession, building: Building, data: GraphImp
     floors: dict[str, Floor] = {}
     for f in data.floors:
         floor = existing.get(f.level) or Floor(building_id=building.id, level=f.level)
-        floor.name, floor.meters_per_px, floor.height_m = f.name, f.meters_per_px, f.height_m
+        for k, v in f.model_dump(exclude={"key", "level"}).items():
+            setattr(floor, k, v)
         session.add(floor)
         floors[f.key] = floor
     await session.flush()

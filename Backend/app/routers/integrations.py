@@ -132,11 +132,16 @@ async def full_route(request: Request, data: FullRouteRequest, session: SessionD
     src = (data.from_location.lat, data.from_location.lon)
 
     restricted = data.profile != "default" or bool(data.overrides)
-    candidates = [n for n in graph.nodes.values()
-                  if n.type == NodeType.entrance.value and n.lat is not None and n.lon is not None
-                  and (n.is_accessible_entrance or not restricted)]
+    # Координаты входа: заданные вручную или вычисленные по привязке этажа к карте
+    geo = {n.id: graph.node_geo(n) for n in graph.nodes.values() if n.type == NodeType.entrance.value}
+    candidates = [graph.nodes[i] for i, c in geo.items()
+                  if c is not None and (graph.nodes[i].is_accessible_entrance or not restricted)]
+
+    def street_m(n) -> float:
+        return external.haversine_m(src[0], src[1], geo[n.id][1], geo[n.id][0])
+
     # Не больше 5 ближайших входов, чтобы запрос не стоил десятков поисков по графу
-    candidates.sort(key=lambda n: external.haversine_m(src[0], src[1], n.lat, n.lon))
+    candidates.sort(key=street_m)
     candidates = candidates[:5]
 
     # Внутренний маршрут от каждого входа, затем выбор по сумме «улица по прямой + внутри»
@@ -144,7 +149,7 @@ async def full_route(request: Request, data: FullRouteRequest, session: SessionD
     for ent in candidates:
         res = await run_in_threadpool(find_route, graph, ent.id, target.id, profile, now)
         if res.found:
-            street_s = external.haversine_m(src[0], src[1], ent.lat, ent.lon) * 1.3 / profile.speed_mps
+            street_s = street_m(ent) * 1.3 / profile.speed_mps
             options.append((street_s + res.cost_s, ent, res))
 
     base = RouteResponse(found=False, building_id=target.building_id, profile=data.profile, params=profile)
@@ -154,13 +159,13 @@ async def full_route(request: Request, data: FullRouteRequest, session: SessionD
                 else "У здания нет входов с координатами"
             return FullRouteResponse(found=False, indoor=base, notices=[notice])
         # Покажем, почему не вышло, на примере ближайшего входа
-        nearest = min(candidates, key=lambda n: external.haversine_m(src[0], src[1], n.lat, n.lon))
+        nearest = candidates[0]
         res = await run_in_threadpool(find_route, graph, nearest.id, target.id, profile, now)
         return FullRouteResponse(found=False, indoor=render_route(graph, res, base, profile, lg))
 
     _, entrance, res = min(options, key=lambda o: o[0])
     indoor = render_route(graph, res, base, profile, lg)
-    dst = (entrance.lat, entrance.lon)
+    dst = (geo[entrance.id][1], geo[entrance.id][0])
 
     notices: list[str] = []
     outdoor = None
@@ -188,6 +193,6 @@ async def full_route(request: Request, data: FullRouteRequest, session: SessionD
         notices.append("Уличный участок построен без учёта бордюров и уклонов, будьте внимательны")
 
     entrance_out = RouteNode(id=entrance.id, floor_id=entrance.floor_id, level=entrance.level, type=entrance.type,
-                             name=entrance.name, ref=entrance.ref, x=entrance.x, y=entrance.y)
+                             name=entrance.name, ref=entrance.ref, x=entrance.x, y=entrance.y, geo=geo[entrance.id])
     return FullRouteResponse(found=True, entrance=entrance_out, outdoor=outdoor, indoor=indoor,
                              total_time_s=outdoor.duration_s + indoor.estimated_time_s, notices=notices)

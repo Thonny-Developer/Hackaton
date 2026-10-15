@@ -12,7 +12,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Building, Edge, Floor, Node, Obstacle
-from app.services.graph import GEdge, GNode, GObstacle, Graph, edge_length
+from app.services.graph import GEdge, GFloor, GNode, GObstacle, Graph, edge_length
 
 _cache: dict[int, Graph] = {}
 _locks: dict[int, asyncio.Lock] = {}
@@ -39,6 +39,9 @@ async def load_graph(session: AsyncSession, building_id: int, version: int) -> G
     ))
 
     g = Graph(building_id=building_id, version=version)
+    for f in floors.values():
+        g.floors[f.id] = GFloor(f.id, f.level, f.meters_per_px, f.height_m, f.geo_origin_lat, f.geo_origin_lon,
+                                f.geo_rotation_deg or 0.0)
     for n in nodes:
         g.nodes[n.id] = GNode(n.id, n.floor_id, floors[n.floor_id].level, n.type.value, n.name, n.ref,
                               n.x, n.y, n.lat, n.lon, n.is_accessible_entrance)

@@ -3,6 +3,7 @@
 REST API навигатора доступной среды. Он строит маршрут внутри здания с учётом потребностей человека: лифтов, пандусов, ширины дверей, ступеней и временных препятствий. Когда доступного пути нет, API так и отвечает и объясняет причину: «дверь 70 см, нужно 90», «лифт не работает».
 
 * Стек: Python 3.12, FastAPI, SQLAlchemy 2 (async), PostgreSQL 17, Redis, MinIO, Caddy, Docker.
+* Карта на фронте: Mapbox. Бэкенд отдаёт готовые координаты и GeoJSON, см. раздел «Карта Mapbox» в [docs/API.md](../docs/API.md).
 * Документация API: Swagger на `/api/docs`. Контракт для фронтенда описан в [docs/API.md](../docs/API.md).
 * Пример графа здания для импорта: [docs/demo_building.json](../docs/demo_building.json).
 
@@ -68,6 +69,7 @@ Caddy :80/:443 ──► api (FastAPI, uvicorn, 2 воркера)
 `Building` → `Floor` → `Node`, плюс `Edge` между узлами и `Obstacle` на узле или ребре.
 
 * У узла есть координаты `x`/`y` в пикселях схемы этажа. Масштаб задаётся в `floor.meters_per_px`.
+* Этаж можно привязать к карте: `geo_origin_lat`/`geo_origin_lon` задают точку, где лежит левый верхний угол схемы, а `geo_rotation_deg` поворот по часовой стрелке от севера. После этого API отдаёт для узлов `geo` в формате `[lon, lat]`, углы схемы `plan_corners` для Mapbox image source и GeoJSON этажа и маршрута ([app/services/geo.py](app/services/geo.py), [app/services/geojson.py](app/services/geojson.py)). Координаты входов для маршрута с улицы тоже берутся из привязки, ручные `lat`/`lon` у узла имеют приоритет.
 * У ребра есть тип (`corridor`, `door`, `stairs`, `elevator`, `ramp`, `lift`, `outdoor`) и параметры доступности: `width_cm`, `steps`, `slope_pct`, `threshold_cm`. Если `length_m` не указана, длина считается по координатам, а между этажами по `floor.height_m`.
 * Препятствие действует с `starts_at` до `ends_at`, его можно выключить флагом `is_active`. Если указан `reduced_width_cm`, проход не перекрывается, а сужается.
 
@@ -114,6 +116,8 @@ app/
     instructions.py  пошаговые инструкции
     i18n.py          тексты RU / KK / EN
     profiles.py      профили доступности
+    geo.py           привязка схемы к карте: пиксели -> [lon, lat]
+    geojson.py       GeoJSON этажа и маршрута для Mapbox
     graph_cache.py   загрузка графа из БД и кэш
     importer.py      импорт графа из JSON
     storage.py       MinIO и проверка схем

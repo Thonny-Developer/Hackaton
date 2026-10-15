@@ -3,9 +3,10 @@ from sqlalchemy import select
 
 from app.deps import Limit, Offset, SessionDep, get_or_404, paginate
 from app.models import Floor, Node, NodeType
+from app.routers.buildings import node_out
 from app.schemas import NodeCreate, NodeOut, NodeUpdate, Page
 from app.security import EditorUser
-from app.services.graph_cache import bump_graph_version
+from app.services.graph_cache import bump_graph_version, get_graph
 
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 
@@ -21,7 +22,13 @@ async def list_nodes(session: SessionDep, building_id: int | None = None, floor_
     if type is not None:
         stmt = stmt.where(Node.type == type)
     items, total = await paginate(session, stmt, limit, offset)
-    return Page(items=items, total=total, limit=limit, offset=offset)
+    graphs: dict = {}
+    out = []
+    for n in items:
+        if n.building_id not in graphs:
+            graphs[n.building_id] = await get_graph(session, n.building_id)
+        out.append(node_out(n, graphs[n.building_id]))
+    return Page(items=out, total=total, limit=limit, offset=offset)
 
 
 @router.post("", response_model=NodeOut, status_code=status.HTTP_201_CREATED)
@@ -31,12 +38,13 @@ async def create_node(data: NodeCreate, session: SessionDep, _: EditorUser):
     session.add(node)
     await bump_graph_version(session, floor.building_id)
     await session.commit()
-    return node
+    return node_out(node, await get_graph(session, node.building_id))
 
 
 @router.get("/{node_id}", response_model=NodeOut)
 async def get_node(node_id: int, session: SessionDep):
-    return await get_or_404(session, Node, node_id, "Узел")
+    node = await get_or_404(session, Node, node_id, "Узел")
+    return node_out(node, await get_graph(session, node.building_id))
 
 
 @router.patch("/{node_id}", response_model=NodeOut)
@@ -55,7 +63,7 @@ async def update_node(node_id: int, data: NodeUpdate, session: SessionDep, _: Ed
     await bump_graph_version(session, node.building_id)
     await session.commit()
     await session.refresh(node)
-    return node
+    return node_out(node, await get_graph(session, node.building_id))
 
 
 @router.delete("/{node_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Удалить узел и все его рёбра")

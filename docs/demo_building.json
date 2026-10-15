@@ -2,8 +2,8 @@
   "name": "Колледж Sapa (демо)",
   "address": "Астана, демо-адрес",
   "description": "Демонстрационное здание: 3 этажа, лифт, лестница, пандус, подъёмник",
-  "lat": 51.09092,
-  "lon": 71.41835,
+  "lat": 51.0910151,
+  "lon": 71.418158,
   "graph": {
     "floors": [
       {
@@ -11,21 +11,30 @@
         "level": 1,
         "name": "1 этаж",
         "meters_per_px": 0.05,
-        "height_m": 3.6
+        "height_m": 3.6,
+        "geo_origin_lat": 51.09115,
+        "geo_origin_lon": 71.4178,
+        "geo_rotation_deg": 0
       },
       {
         "key": "f2",
         "level": 2,
         "name": "2 этаж",
         "meters_per_px": 0.05,
-        "height_m": 3.6
+        "height_m": 3.6,
+        "geo_origin_lat": 51.09115,
+        "geo_origin_lon": 71.4178,
+        "geo_rotation_deg": 0
       },
       {
         "key": "f3",
         "level": 3,
         "name": "3 этаж",
         "meters_per_px": 0.05,
-        "height_m": 3.6
+        "height_m": 3.6,
+        "geo_origin_lat": 51.09115,
+        "geo_origin_lon": 71.4178,
+        "geo_rotation_deg": 0
       }
     ],
     "nodes": [
@@ -225,9 +234,7 @@
         "x": 500,
         "y": 590,
         "name": "Главный вход",
-        "ref": null,
-        "lat": 51.09085,
-        "lon": 71.4181
+        "ref": null
       },
       {
         "key": "lobby",
@@ -246,8 +253,6 @@
         "y": 480,
         "name": "Боковой вход (пандус)",
         "ref": null,
-        "lat": 51.09098,
-        "lon": 71.41862,
         "is_accessible_entrance": true
       },
       {

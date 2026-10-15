@@ -20,6 +20,8 @@ from app.schemas import (
     RouteStep,
     SearchHit,
 )
+from app.services.geo import floor_lonlat
+from app.services.geojson import route_geojson
 from app.services.graph import Graph, Problem, RouteResult, find_route
 from app.services.graph_cache import get_graph
 from app.services.i18n import Lang, normalize_lang, t
@@ -55,7 +57,7 @@ async def search(request: Request, session: SessionDep,
         else_=3,
     )
     stmt = (
-        select(Node, Floor.level, Building.name)
+        select(Node, Floor, Building.name)
         .join(Floor, Floor.id == Node.floor_id)
         .join(Building, Building.id == Node.building_id)
         .where(Node.type != NodeType.corridor)
@@ -67,9 +69,10 @@ async def search(request: Request, session: SessionDep,
         stmt = stmt.where(Node.building_id == building_id)
     rows = (await session.execute(stmt)).all()
     return [
-        SearchHit(node_id=n.id, building_id=n.building_id, building_name=bname, floor_id=n.floor_id, level=level,
-                  type=n.type, name=n.name, ref=n.ref, x=n.x, y=n.y)
-        for n, level, bname in rows
+        SearchHit(node_id=n.id, building_id=n.building_id, building_name=bname, floor_id=n.floor_id, level=fl.level,
+                  type=n.type, name=n.name, ref=n.ref, x=n.x, y=n.y,
+                  geo=[n.lon, n.lat] if n.lat is not None and n.lon is not None else floor_lonlat(fl, n.x, n.y))
+        for n, fl, bname in rows
     ]
 
 
@@ -127,7 +130,8 @@ def render_route(graph: Graph, res: RouteResult, base: RouteResponse, profile: P
     base.estimated_time_s = round(res.cost_s)
     base.floors = floors
     base.nodes = [RouteNode(id=n.id, floor_id=n.floor_id, level=n.level, type=n.type, name=n.name, ref=n.ref,
-                            x=n.x, y=n.y) for n in (graph.nodes[i] for i in res.node_ids)]
+                            x=n.x, y=n.y, geo=graph.node_geo(n)) for n in (graph.nodes[i] for i in res.node_ids)]
+    base.geojson = route_geojson(graph, res.node_ids)
     base.edges = []
     for i, eid in enumerate(res.edge_ids):
         e = graph.edges[eid]

@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from app.services.geo import floor_lonlat
 from app.services.profiles import Profile
 
 VERTICAL_TYPES = {"elevator", "lift"}
@@ -75,10 +76,22 @@ class GObstacle:
         return not (self.ends_at and self.ends_at <= now)
 
 
+@dataclass(slots=True)
+class GFloor:
+    id: int
+    level: int
+    meters_per_px: float = 0.05
+    height_m: float = 3.5
+    geo_origin_lat: float | None = None
+    geo_origin_lon: float | None = None
+    geo_rotation_deg: float = 0.0
+
+
 @dataclass
 class Graph:
     building_id: int
     version: int
+    floors: dict[int, GFloor] = field(default_factory=dict)
     nodes: dict[int, GNode] = field(default_factory=dict)
     edges: dict[int, GEdge] = field(default_factory=dict)
     obstacles: list[GObstacle] = field(default_factory=list)
@@ -86,6 +99,13 @@ class Graph:
     adj: dict[int, list[tuple[int, int]]] = field(default_factory=dict)
     # Все инцидентные рёбра без учёта направления (для препятствий на узлах)
     incident: dict[int, list[int]] = field(default_factory=dict)
+
+    def node_geo(self, n: GNode) -> list[float] | None:
+        """[lon, lat] узла: заданные вручную координаты важнее вычисленных по привязке этажа."""
+        if n.lat is not None and n.lon is not None:
+            return [n.lon, n.lat]
+        floor = self.floors.get(n.floor_id)
+        return floor_lonlat(floor, n.x, n.y) if floor else None
 
     def build_index(self) -> None:
         self.adj = {nid: [] for nid in self.nodes}

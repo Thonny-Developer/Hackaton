@@ -106,6 +106,10 @@ class Floor(TimestampMixin, Base):
     name: Mapped[str | None] = mapped_column(String(100))
     meters_per_px: Mapped[float] = mapped_column(Float, default=0.05)
     height_m: Mapped[float] = mapped_column(Float, default=3.5)
+    # Привязка к карте: где на местности левый верхний угол схемы и как схема повёрнута
+    geo_origin_lat: Mapped[float | None] = mapped_column(Float)
+    geo_origin_lon: Mapped[float | None] = mapped_column(Float)
+    geo_rotation_deg: Mapped[float] = mapped_column(Float, default=0, server_default="0")
     plan_object_key: Mapped[str | None] = mapped_column(String(300))
     plan_content_type: Mapped[str | None] = mapped_column(String(50))
     plan_width_px: Mapped[int | None] = mapped_column(Integer)

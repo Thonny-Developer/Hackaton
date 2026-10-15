@@ -24,7 +24,9 @@ Edge (переход между двумя узлами: коридор, две�
 Obstacle (временное препятствие на узле или ребре)
 ```
 
-**Координаты.** `x` и `y` узла задаются в пикселях картинки этажа: `x` вправо, `y` вниз, начало в левом верхнем углу. Размер картинки лежит в `floor.plan_width_px` и `floor.plan_height_px`. Если вы растягиваете схему, умножайте координаты на тот же коэффициент. Масштаб `floor.meters_per_px` нужен бэкенду для расчёта длин, фронту он обычно не нужен.
+**Координаты.** `x` и `y` узла задаются в пикселях картинки этажа: `x` вправо, `y` вниз, начало в левом верхнем углу. Размер картинки лежит в `floor.plan_width_px` и `floor.plan_height_px`. Если вы растягиваете схему, умножайте координаты на тот же коэффициент. Масштаб `floor.meters_per_px` нужен бэкенду для расчёта длин.
+
+**Координаты на карте.** Если этаж привязан к карте (заполнены `geo_origin_lat`, `geo_origin_lon` и `geo_rotation_deg`), у каждого узла, результата поиска и точки маршрута есть поле `geo` в формате `[lon, lat]`. Для Mapbox берите его, а не `x`/`y`. Подробности в разделе [Карта Mapbox](#карта-mapbox).
 
 **Типы узлов** (`node.type`): `room`, `entrance`, `corridor`, `elevator`, `stairs`, `ramp`, `lift` (подъёмник), `toilet`, `other`. Узлы `corridor` служат служебными точками графа. Их удобно не рисовать или рисовать мелко.
 
@@ -40,6 +42,7 @@ Obstacle (временное препятствие на узле или реб�
 | GET | `/buildings/{id}` | Одно здание |
 | GET | `/buildings/{id}/floors` | Этажи здания по возрастанию `level` |
 | GET | `/floors/{id}` | Этаж целиком: узлы, рёбра и действующие препятствия. **Основной запрос для отрисовки этажа** |
+| GET | `/floors/{id}/geojson` | Тот же этаж в GeoJSON для Mapbox (409, если этаж не привязан к карте) |
 | GET | `/floors/{id}/plan` | Картинка схемы (PNG, JPEG, WebP или SVG) |
 | GET | `/buildings/{id}/graph` | Весь граф здания одним ответом (все этажи, узлы, рёбра) |
 | GET | `/search?q=204&building_id=&limit=` | Поиск помещения по номеру или названию |
@@ -67,7 +70,8 @@ Obstacle (временное препятствие на узле или реб�
     "name": "Компьютерный класс",
     "ref": "204",
     "x": 500.0,
-    "y": 150.0
+    "y": 150.0,
+    "geo": [71.418158, 51.0910826]
   }
 ]
 ```
@@ -118,8 +122,10 @@ Obstacle (временное препятствие на узле или реб�
   "estimated_time_s": 116.0,
   "floors": [1, 2],
   "nodes": [
-    { "id": 61, "floor_id": 1, "level": 1, "type": "room", "name": "Библиотека", "ref": "105", "x": 500.0, "y": 150.0 },
-    { "id": 37, "floor_id": 1, "level": 1, "type": "corridor", "name": null, "ref": null, "x": 500.0, "y": 300.0 }
+    { "id": 61, "floor_id": 1, "level": 1, "type": "room", "name": "Библиотека", "ref": "105",
+      "x": 500.0, "y": 150.0, "geo": [71.418158, 51.0910826] },
+    { "id": 37, "floor_id": 1, "level": 1, "type": "corridor", "name": null, "ref": null,
+      "x": 500.0, "y": 300.0, "geo": [71.418158, 51.0910151] }
   ],
   "edges": [
     { "id": 60, "from_node_id": 61, "to_node_id": 37, "type": "door", "length_m": 7.5 }
@@ -139,13 +145,23 @@ Obstacle (временное препятствие на узле или реб�
       "to_level": null, "distance_m": 0.0, "duration_s": 0.0, "node_ids": [64], "edge_ids": [] }
   ],
   "warnings": [],
-  "reason": null
+  "reason": null,
+  "geojson": {
+    "type": "FeatureCollection",
+    "features": [
+      { "type": "Feature", "properties": { "kind": "route", "floor_id": 1, "level": 1 },
+        "geometry": { "type": "LineString", "coordinates": [[71.418158, 51.0910826], [71.418158, 51.0910151], "..."] } },
+      { "type": "Feature", "properties": { "kind": "transition", "floor_id": 1, "level": 1, "to_level": 2, "node_id": 41 },
+        "geometry": { "type": "Point", "coordinates": [71.4184873, 51.0910151] } },
+      "... линия 2 этажа, точки start и finish"
+    ]
+  }
 }
 ```
 
 Что с этим делать на фронте:
 
-* **Линия маршрута.** Берите `nodes` по порядку, фильтруйте по `floor_id` текущего этажа и соединяйте точки `x`/`y`. Рёбра в `edges` уже развёрнуты по ходу движения.
+* **Линия маршрута.** Для Mapbox берите готовый `geojson` из ответа (см. [Карта Mapbox](#карта-mapbox)). Если рисуете поверх картинки, берите `nodes` по порядку, фильтруйте по `floor_id` текущего этажа и соединяйте точки `x`/`y`. Рёбра в `edges` уже развёрнуты по ходу движения.
 * **Переключение этажей.** В `floors` перечислены уровни в порядке прохождения. Шаги с `to_level` означают переход на другой этаж: удобное место, чтобы переключить схему.
 * **Пошаговая подсказка.** `steps[].text` уже переведён на язык из `lang`. Если хотите свои тексты или иконки, ориентируйтесь на `action`.
 * **Подсветка шага.** `node_ids` и `edge_ids` показывают, какой участок линии относится к шагу.
@@ -223,10 +239,77 @@ Obstacle (временное препятствие на узле или реб�
 }
 ```
 
-* `outdoor.geometry` задаётся как `[lon, lat]`, такой порядок принят в GeoJSON и 2GIS MapGL.
+* `outdoor.geometry` задаётся как `[lon, lat]`, такой порядок принят в GeoJSON и Mapbox. Для слоя его достаточно обернуть: `{type: "Feature", geometry: {type: "LineString", coordinates: outdoor.geometry}}`.
+* `entrance.geo` содержит координаты выбранного входа, это точка стыка уличной и внутренней частей.
 * `outdoor.provider` бывает `ors` (OpenRouteService, учитывает бордюры и уклоны), `2gis` (обычный пеший маршрут) или `straight_line` (ключей внешних API нет или они не ответили).
 * Если `accessibility_checked=false`, а профиль не `default`, честно предупредите пользователя: на уличном участке ограничения не проверялись. Тексты для этого уже лежат в `notices`.
 * Какие внешние API подключены, показывает `GET /api/v1/integrations/status` → `{"dgis": true, "ors": false}`.
+
+## Карта Mapbox
+
+Бэкенд сам переводит пиксели схемы в координаты, фронту остаётся только передать готовые данные в Mapbox GL. Всё работает, когда этаж привязан к карте (на демо-стенде привязаны все этажи).
+
+| Что | Откуда | Как использовать в Mapbox |
+|---|---|---|
+| Картинка этажа на карте | `floor.plan_url` + `floor.plan_corners` | Источник `image` |
+| Узлы и переходы этажа | `GET /floors/{id}/geojson` | Источник `geojson`, слои `circle` и `line` |
+| Линия маршрута | `geojson` в ответе `POST /route` (и `indoor.geojson` у `/route/full`) | Источник `geojson`, фильтр по `level` |
+| Улица до входа | `outdoor.geometry` у `/route/full` | `LineString` из `[lon, lat]` |
+| Точка помещения | `geo` у результатов `/search` и узлов | `flyTo({center: geo})` |
+
+`plan_corners` хранит четыре угла картинки в порядке, который ждёт Mapbox: левый верхний, правый верхний, правый нижний, левый нижний. Если схема не загружена или этаж не привязан, там `null`.
+
+**GeoJSON этажа** состоит из точек узлов (`properties.kind = "node"`, плюс `type`, `name`, `ref`, `is_accessible_entrance`) и линий переходов внутри этажа (`kind = "edge"`, плюс `type`, `width_cm`, `steps`, `slope_pct`). Всё, что сейчас перекрыто препятствием, помечено `blocked: true` и `obstacle_id`. Сломанный лифт тоже помечается на самом узле лифта.
+
+**GeoJSON маршрута** содержит по одной линии на каждый этаж (`kind = "route"`, `level`), точки `start` и `finish`, а также точки `transition` в местах смены этажа (`level`, `to_level`). Показывайте только линию текущего этажа через фильтр по `level`.
+
+```js
+const API = "https://api.example.kz";
+
+// Схема этажа поверх карты
+map.addSource("plan", { type: "image", url: API + floor.plan_url, coordinates: floor.plan_corners });
+map.addLayer({ id: "plan", type: "raster", source: "plan", paint: { "raster-opacity": 0.9 } });
+
+// Узлы и переходы этажа
+const floorGeo = await fetch(`${API}/api/v1/floors/${floor.id}/geojson`).then(r => r.json());
+map.addSource("floor", { type: "geojson", data: floorGeo });
+map.addLayer({ id: "edges", type: "line", source: "floor", filter: ["==", ["get", "kind"], "edge"],
+  paint: { "line-color": ["case", ["get", "blocked"], "#d33", "#999"], "line-width": 2 } });
+map.addLayer({ id: "nodes", type: "circle", source: "floor",
+  filter: ["all", ["==", ["get", "kind"], "node"], ["!=", ["get", "type"], "corridor"]],
+  paint: { "circle-radius": 5, "circle-color": ["case", ["get", "blocked"], "#d33", "#1e6fd9"] } });
+
+// Маршрут: показываем только текущий этаж
+const route = await fetch(`${API}/api/v1/route?lang=ru`, {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ from_node: 61, to_node: 64, profile: "wheelchair" }),
+}).then(r => r.json());
+if (route.found && route.geojson) {
+  map.addSource("route", { type: "geojson", data: route.geojson });
+  map.addLayer({ id: "route", type: "line", source: "route",
+    filter: ["all", ["==", ["get", "kind"], "route"], ["==", ["get", "level"], floor.level]],
+    paint: { "line-color": "#0a7", "line-width": 5 } });
+}
+// При переключении этажа: map.setFilter("route", [... , ["==", ["get", "level"], newLevel]])
+```
+
+Если `geojson` равен `null`, этаж не привязан к карте. Тогда рисуйте маршрут по `x`/`y` поверх картинки, как описано выше.
+
+**Как привязать этаж** (делает редактор, один раз на этаж):
+
+```http
+PATCH /api/v1/floors/{id}
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "geo_origin_lat": 51.09115, "geo_origin_lon": 71.41780, "geo_rotation_deg": 0, "meters_per_px": 0.05 }
+```
+
+* `geo_origin_lat` и `geo_origin_lon` задают точку на местности, где лежит левый верхний угол картинки схемы.
+* `geo_rotation_deg` задаёт поворот схемы по часовой стрелке относительно севера: 0, если верх картинки смотрит на север.
+* `meters_per_px` отвечает за масштаб схемы. От него зависят и длины маршрута, и размер картинки на карте.
+
+Удобнее всего подбирать значения в админке: показать полупрозрачную схему поверх Mapbox и двигать и поворачивать её, пока стены не совпадут со зданием на подложке. Координаты входов после этого считаются автоматически. Ручные `lat`/`lon` у узла нужны, только если точка на местности не совпадает со схемой.
 
 ## Авторизация (админка)
 
