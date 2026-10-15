@@ -1,4 +1,4 @@
-"""Клиенты внешних API: 2GIS (здания, пеший маршрут) и OpenRouteService (маршрут для коляски).
+"""Клиенты внешних API: 2GIS (здания, подсказки адресов, пеший маршрут) и OpenRouteService (маршрут для коляски).
 
 Ключи живут только на сервере. Ответы кэшируются в памяти, чтобы не тратить квоту
 на одинаковые запросы.
@@ -17,8 +17,11 @@ from app.config import get_settings
 from app.services.profiles import Profile
 
 log = logging.getLogger(__name__)
+# httpx на уровне INFO пишет полный URL запроса, а в нём ключ 2GIS
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 DGIS_CATALOG = "https://catalog.api.2gis.com/3.0/items"
+DGIS_SUGGEST = "https://catalog.api.2gis.com/3.0/suggests"
 DGIS_ROUTING = "https://routing.api.2gis.com/routing/7.0.0/global"
 ORS_WHEELCHAIR = "https://api.openrouteservice.org/v2/directions/wheelchair/geojson"
 
@@ -34,6 +37,16 @@ class ExtBuilding:
     address: str | None
     lat: float | None
     lon: float | None
+
+
+@dataclass
+class Suggestion:
+    id: str
+    type: str  # building, branch, street, adm_div, station...
+    name: str
+    address: str | None
+    lat: float
+    lon: float
 
 
 @dataclass
@@ -79,8 +92,10 @@ _client: httpx.AsyncClient | None = None
 def http() -> httpx.AsyncClient:
     global _client
     if _client is None:
+        # retries повторяет только неудачное соединение (DNS, TCP), а не запросы с ответом
         _client = httpx.AsyncClient(timeout=get_settings().external_timeout_s,
-                                    limits=httpx.Limits(max_connections=20))
+                                    limits=httpx.Limits(max_connections=20),
+                                    transport=httpx.AsyncHTTPTransport(retries=2))
     return _client
 
 
@@ -145,6 +160,41 @@ async def dgis_get_building(external_id: str, locale: str) -> ExtBuilding | None
     return _parse_item(items[0]) if items else None
 
 
+def _suggest_address(it: dict, name: str) -> str | None:
+    """Вторая строка подсказки: адрес, если он не повторяет название, иначе полное имя с городом."""
+    for candidate in (it.get("address_name"), it.get("full_name")):
+        if candidate and candidate != name:
+            return candidate
+    return None
+
+
+async def dgis_suggest(q: str, lat: float | None, lon: float | None, locale: str) -> list[Suggestion]:
+    """Подсказки при вводе адреса. Варианты без координат (продолжения запроса) отбрасываются,
+    потому что по ним нельзя ни поставить точку, ни построить маршрут."""
+    cache_key = ("suggest", q.lower(), lat and round(lat, 2), lon and round(lon, 2), locale)
+    if (hit := _cache.get(cache_key)) is not None:
+        return hit
+    params = {"q": q, "fields": "items.point,items.address", "locale": locale, "key": _dgis_key()}
+    if lat is not None and lon is not None:
+        params["location"] = f"{lon},{lat}"
+    found: list[Suggestion] = []
+    seen: set[tuple] = set()
+    for it in await _dgis_items(DGIS_SUGGEST, params):
+        point = it.get("point") or {}
+        if not it.get("id") or point.get("lat") is None or point.get("lon") is None:
+            continue
+        name = it.get("name") or it.get("full_name") or ""
+        # Организация и её бренд приходят отдельными пунктами с одной и той же точкой
+        dedup = (name, round(point["lat"], 5), round(point["lon"], 5))
+        if dedup in seen:
+            continue
+        seen.add(dedup)
+        found.append(Suggestion(id=str(it["id"]), type=it.get("type") or "", name=name,
+                                address=_suggest_address(it, name), lat=point["lat"], lon=point["lon"]))
+    _cache.set(cache_key, found)
+    return found
+
+
 _WKT_POINT = re.compile(r"(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)")
 
 
@@ -152,8 +202,9 @@ def _wkt_coords(wkt: str) -> list[list[float]]:
     return [[float(a), float(b)] for a, b in _WKT_POINT.findall(wkt or "")]
 
 
-async def dgis_walk_route(src: tuple[float, float], dst: tuple[float, float], lang: str) -> OutdoorRoute:
-    cache_key = ("2gis", round(src[0], 5), round(src[1], 5), round(dst[0], 5), round(dst[1], 5), lang)
+async def dgis_walk_route(src: tuple[float, float], dst: tuple[float, float], lang: str,
+                          avoid_stairs: bool = False) -> OutdoorRoute:
+    cache_key = ("2gis", round(src[0], 5), round(src[1], 5), round(dst[0], 5), round(dst[1], 5), lang, avoid_stairs)
     if (hit := _cache.get(cache_key)) is not None:
         return hit
     body = {
@@ -161,6 +212,8 @@ async def dgis_walk_route(src: tuple[float, float], dst: tuple[float, float], la
         "transport": "walking",
         "locale": {"ru": "ru", "kk": "kk", "en": "en"}.get(lang, "ru"),
     }
+    if avoid_stairs:
+        body["filters"] = ["ban_stairway"]
     try:
         r = await http().post(DGIS_ROUTING, params={"key": _dgis_key()}, json=body)
     except httpx.HTTPError as exc:
@@ -172,15 +225,25 @@ async def dgis_walk_route(src: tuple[float, float], dst: tuple[float, float], la
     if not results:
         raise ExternalError("2GIS не нашёл пеший маршрут")
     best = results[0]
-    geometry: list[list[float]] = []
+
+    def selection(part: dict | None) -> list[list[float]]:
+        return _wkt_coords(((part or {}).get("geometry") or {}).get("selection", ""))
+
+    # Отрезки от точки до ближайшей дорожки и от дорожки до цели лежат вне манёвров
+    geometry: list[list[float]] = selection(best.get("begin_pedestrian_path"))
     steps: list[OutdoorStep] = []
     for m in best.get("maneuvers") or []:
         path = m.get("outcoming_path") or {}
         for g in path.get("geometry") or []:
             geometry.extend(_wkt_coords(g.get("selection", "")))
-        text = m.get("comment") or m.get("outcoming_path_comment")
+        # У начала и конца в comment служебные start/finish, человеческий текст лежит в outcoming_path_comment
+        if m.get("type") in ("begin", "end"):
+            text = m.get("outcoming_path_comment")
+        else:
+            text = m.get("comment") or m.get("outcoming_path_comment")
         if text:
             steps.append(OutdoorStep(text=text, distance_m=float(path.get("distance") or 0)))
+    geometry.extend(selection(best.get("end_pedestrian_path")))
     route = OutdoorRoute("2gis", False, float(best.get("total_distance") or 0), float(best.get("total_duration") or 0),
                          geometry, steps)
     _cache.set(cache_key, route)

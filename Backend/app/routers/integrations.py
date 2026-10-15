@@ -1,4 +1,4 @@
-"""Этап 2: здания из 2GIS и маршрут «улица → доступный вход → аудитория»."""
+"""Этап 2: здания и подсказки адресов из 2GIS, уличный маршрут и маршрут «улица → доступный вход → аудитория»."""
 
 from datetime import UTC, datetime
 from typing import Annotated, Literal
@@ -25,6 +25,8 @@ router = APIRouter(tags=["integrations"])
 _s = get_settings()
 
 DGIS_LOCALES = {"ru": "ru_KZ", "kk": "kk_KZ", "en": "en_KZ"}
+# Дальше пешком не ходят, а запрос к 2GIS всё равно тратит квоту
+MAX_WALK_M = 30_000
 
 
 class IntegrationStatus(BaseModel):
@@ -57,6 +59,22 @@ class FullRouteRequest(BaseModel):
     overrides: ProfileOverrides | None = None
 
 
+class SuggestionOut(BaseModel):
+    id: str = Field(description="id объекта в 2GIS")
+    type: str = Field(description="building, branch, street, adm_div, station...")
+    name: str
+    address: str | None = Field(description="Вторая строка подсказки")
+    lat: float
+    lon: float
+
+
+class OutdoorRouteRequest(BaseModel):
+    from_location: LatLon
+    to_location: LatLon
+    profile: ProfileName = "default"
+    overrides: ProfileOverrides | None = None
+
+
 class OutdoorStepOut(BaseModel):
     text: str
     distance_m: float
@@ -69,6 +87,11 @@ class OutdoorOut(BaseModel):
     duration_s: float
     geometry: list[list[float]] = Field(description="[[lon, lat], ...]")
     steps: list[OutdoorStepOut]
+
+
+class OutdoorRouteResponse(BaseModel):
+    route: OutdoorOut
+    notices: list[str] = Field(default_factory=list)
 
 
 class FullRouteResponse(BaseModel):
@@ -94,6 +117,53 @@ async def dgis_search(_: EditorUser, q: Annotated[str, Query(min_length=2, max_l
     except external.ExternalError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from None
     return [ExtBuildingOut(**b.__dict__) for b in found]
+
+
+@router.get("/geo/suggest", response_model=list[SuggestionOut],
+            summary="Подсказки адресов и мест при вводе (2GIS)")
+@limiter.limit(_s.rate_limit_search)
+async def geo_suggest(request: Request, q: Annotated[str, Query(min_length=2, max_length=200)],
+                      lat: Lat | None = None, lon: Lon | None = None, lang: LangQuery = "ru"):
+    """Отдаёт только варианты с координатами. `lat`/`lon` поднимают выше то, что рядом (центр карты
+    или пользователь). Вызывайте с задержкой после ввода, а не на каждую букву."""
+    if not _s.dgis_api_key:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Подсказки адресов отключены: нет ключа 2GIS")
+    try:
+        found = await external.dgis_suggest(q.strip(), lat, lon, DGIS_LOCALES[normalize_lang(lang)])
+    except external.ExternalError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from None
+    return [SuggestionOut(**it.__dict__) for it in found]
+
+
+def _outdoor_out(r: external.OutdoorRoute) -> OutdoorOut:
+    return OutdoorOut(provider=r.provider, accessibility_checked=r.accessibility_checked,
+                      distance_m=round(r.distance_m, 1), duration_s=round(r.duration_s),
+                      geometry=r.geometry, steps=[OutdoorStepOut(**s.__dict__) for s in r.steps])
+
+
+@router.post("/route/outdoor", response_model=OutdoorRouteResponse,
+             summary="Пеший маршрут по улице между двумя точками (2GIS)")
+@limiter.limit(_s.rate_limit_outdoor)
+async def outdoor_route(request: Request, data: OutdoorRouteRequest, lang: LangQuery = "ru"):
+    """Если профиль запрещает лестницы, 2GIS строит путь без лестниц. Бордюры и уклоны 2GIS
+    не учитывает, поэтому `accessibility_checked` всегда false."""
+    if not _s.dgis_api_key:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Уличные маршруты отключены: нет ключа 2GIS")
+    lg = normalize_lang(lang)
+    profile = resolve_profile(data.profile, data.overrides)
+    src = (data.from_location.lat, data.from_location.lon)
+    dst = (data.to_location.lat, data.to_location.lon)
+    if external.haversine_m(*src, *dst) > MAX_WALK_M:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            f"Точки дальше {MAX_WALK_M // 1000} км друг от друга, пеший маршрут не строим")
+    try:
+        r = await external.dgis_walk_route(src, dst, lg, avoid_stairs=not profile.allow_stairs)
+    except external.ExternalError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from None
+    notices = []
+    if data.profile != "default" or data.overrides:
+        notices.append("Уличный участок построен без учёта бордюров и уклонов, будьте внимательны")
+    return OutdoorRouteResponse(route=_outdoor_out(r), notices=notices)
 
 
 @router.post("/integrations/2gis/import", response_model=BuildingOut, status_code=status.HTTP_201_CREATED,
@@ -173,13 +243,10 @@ async def full_route(request: Request, data: FullRouteRequest, session: SessionD
     if restricted and _s.ors_api_key:
         providers.append(lambda: external.ors_wheelchair_route(src, dst, profile, lg))
     if _s.dgis_api_key:
-        providers.append(lambda: external.dgis_walk_route(src, dst, lg))
+        providers.append(lambda: external.dgis_walk_route(src, dst, lg, avoid_stairs=not profile.allow_stairs))
     for call in providers:
         try:
-            r = await call()
-            outdoor = OutdoorOut(provider=r.provider, accessibility_checked=r.accessibility_checked,
-                                 distance_m=round(r.distance_m, 1), duration_s=round(r.duration_s),
-                                 geometry=r.geometry, steps=[OutdoorStepOut(**s.__dict__) for s in r.steps])
+            outdoor = _outdoor_out(await call())
             break
         except external.ExternalError as exc:
             notices.append(str(exc))

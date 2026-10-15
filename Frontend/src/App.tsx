@@ -1,9 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
-import MapboxMap from "./MapboxMap";
+import { useEffect, useMemo, useRef, useState } from "react";
+import AddressInput, { type AddressOption } from "./AddressInput";
+import { API_BASE, DEFAULT_CENTER, type AddressSuggestion, type LatLon, type OutdoorRoute, currentPosition, fetchOutdoorRoute, formatDistance, formatDuration, useAddressSuggestions } from "./geo";
+import MapboxMap, { type MapRoute } from "./MapboxMap";
+import { type ApiBuilding, type ApiReport, type ApiUser, PASSWORD_MIN, addFavorite, forgotPassword, getFavorites, getMe, getMyReports, getToken, login, register, removeFavorite, resetPassword, sendReport, setToken, updateMe } from "./api";
 
 type AccessState = "accessible" | "partial" | "barrier" | "unknown";
-type AuthView = "login" | "register" | "recovery" | "profile" | "preferences" | null;
-type PrototypeUser = { name: string; email: string };
+type AuthView = "login" | "register" | "recovery" | "reset" | "profile" | "preferences" | null;
+
+const displayName = (user: ApiUser) => user.name || user.email.split("@")[0];
+const errorText = (e: unknown) => e instanceof Error ? e.message : "Не удалось выполнить запрос.";
 type Place = {
   id: number;
   name: string;
@@ -128,6 +133,21 @@ const buildingCategories = [
   ["Парк", "Парки и общественные места"],
 ] as const;
 
+// 2GIS часто уже пишет расстояние в тексте шага («1.4 км прямо»), тогда второй раз его не показываем
+const HAS_DISTANCE = /\d\s*к?м(?![а-яё])/i;
+
+const MY_LOCATION: AddressOption = { key: "me", title: "Моё местоположение", kind: "me" };
+
+let addressPlaceSeq = 0;
+// Точка из подсказок 2GIS, у которой нет записи в нашей базе. Отрицательный id не пересекается с id из API
+function addressPlace(name: string, address: string | null, lat: number, lon: number): Place {
+  addressPlaceSeq += 1;
+  return {
+    id: -addressPlaceSeq, name, type: "Адрес", address: address || "", state: "unknown",
+    summary: "Данных о доступности пока нет", updated: "—", x: 0, y: 0, features: [], route: false, lat, lon,
+  };
+}
+
 const statusText: Record<AccessState, string> = {
   accessible: "Доступно",
   partial: "Частично доступно",
@@ -192,10 +212,9 @@ function Status({ state }: { state: AccessState }) {
 export default function App() {
   const [apiPlaces, setApiPlaces] = useState<Place[] | null>(null);
   const [apiState, setApiState] = useState<"loading" | "ready" | "offline">("loading");
-  const apiBase = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000").replace(/\/$/, "");
   useEffect(() => {
     let alive = true;
-    fetch(`${apiBase}/api/v1/buildings?limit=200`)
+    fetch(`${API_BASE}/api/v1/buildings?limit=200`)
       .then((response) => { if (!response.ok) throw new Error("API unavailable"); return response.json(); })
       .then((page) => {
         if (!alive) return;
@@ -208,21 +227,70 @@ export default function App() {
       })
       .catch(() => { if (alive) setApiState("offline"); });
     return () => { alive = false; };
-  }, [apiBase]);
+  }, []);
+
+  // Аккаунт: токен лежит в браузере, профиль и избранное приходят с бэкенда
+  const [user, setUser] = useState<ApiUser | null>(null);
+  const [favorites, setFavorites] = useState<number[]>([]);
+  const [favoriteBuildings, setFavoriteBuildings] = useState<ApiBuilding[]>([]);
+  const [resetToken, setResetToken] = useState<string | null>(null);
+  const loadFavorites = () => getFavorites()
+    .then((items) => { setFavoriteBuildings(items); setFavorites(items.map((building) => building.id)); })
+    .catch(() => {});
+  const applyUser = (me: ApiUser) => {
+    setUser(me);
+    // Настройки из профиля становятся параметрами маршрута по умолчанию
+    const routeDefaults = me.accessibility_prefs.filter((pref) => pref !== "toilet");
+    if (routeDefaults.length) setPrefs(routeDefaults);
+  };
+  const signIn = async (token: string, remember: boolean) => {
+    setToken(token, remember);
+    const me = await getMe();
+    applyUser(me);
+    loadFavorites();
+    return me;
+  };
+  const signOut = () => {
+    setToken(null);
+    setUser(null);
+    setFavorites([]);
+    setFavoriteBuildings([]);
+    setFavoritesOnly(false);
+  };
+  useEffect(() => {
+    // Ссылка из письма: /reset-password?token=...
+    const params = new URLSearchParams(window.location.search);
+    if (window.location.pathname === "/reset-password" && params.get("token")) {
+      setResetToken(params.get("token"));
+      setAuthView("reset");
+      setWelcomeOpen(false);
+    }
+    if (!getToken()) return;
+    getMe().then((me) => { applyUser(me); loadFavorites(); })
+      .catch((e) => { if (e?.status === 401) setToken(null); });
+  }, []);
+
   const [welcomeOpen, setWelcomeOpen] = useState(true);
   const [query, setQuery] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
-  const [favorites, setFavorites] = useState<number[]>([2]);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [selected, setSelected] = useState<Place | null>(null);
   const [routePanel, setRoutePanel] = useState(false);
-  const [routeShown, setRouteShown] = useState(false);
+  const [routeFrom, setRouteFrom] = useState<AddressOption | null>(MY_LOCATION);
+  const [routeFromText, setRouteFromText] = useState(MY_LOCATION.title);
+  const [routeToText, setRouteToText] = useState("");
+  const [routeResult, setRouteResult] = useState<{ route: OutdoorRoute; notices: string[] } | null>(null);
+  const [mapRoute, setMapRoute] = useState<MapRoute | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<string[]>(["noSteps"]);
   const [savedPrefs, setSavedPrefs] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportSent, setReportSent] = useState(false);
   const [reportText, setReportText] = useState("");
+  const [reportSending, setReportSending] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [sosOpen, setSosOpen] = useState(false);
   const [sosSent, setSosSent] = useState(false);
   const [sosLocation, setSosLocation] = useState("");
@@ -231,17 +299,26 @@ export default function App() {
   const [sosDetails, setSosDetails] = useState("");
   const [authView, setAuthView] = useState<AuthView>(null);
   const [profileMenu, setProfileMenu] = useState(false);
-  const [user, setUser] = useState<PrototypeUser | null>(null);
-  const [prototypeAccount, setPrototypeAccount] = useState<{ name: string; email: string; password: string } | null>(null);
-  const [accountPrefs, setAccountPrefs] = useState<string[]>(["noSteps"]);
   const [activeCategories, setActiveCategories] = useState<string[]>([]);
   const [layersOpen, setLayersOpen] = useState(false);
   const [mapLayer, setMapLayer] = useState("Схема");
   const [locationActive, setLocationActive] = useState(false);
   const [detailExpanded, setDetailExpanded] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  useEffect(() => { if (routePanel) setSheetOpen(true); }, [routePanel]);
+  const mapRef = useRef<any>(null);
+  // Подсказки 2GIS ранжируются по близости к центру карты
+  const getNear = (): LatLon => {
+    const center = mapRef.current?.getCenter?.();
+    return center ? { lat: center.lat, lon: center.lng } : DEFAULT_CENTER;
+  };
+  const searchSuggest = useAddressSuggestions(query, getNear, !routePanel && !favoritesOnly);
 
   const sourcePlaces = apiPlaces?.length ? apiPlaces : places;
   const selectedIsFromApi = selected != null && Boolean(apiPlaces?.some((place) => place.id === selected.id));
+  // Адрес из подсказок 2GIS: есть координаты, но нет паспорта доступности
+  const selectedIsAddress = selected != null && selected.id < 0;
   const visiblePlaces = useMemo(() => sourcePlaces.filter((place) => {
     const matchesSearch = `${place.name} ${place.type} ${place.address}`.toLowerCase().includes(query.toLowerCase());
     const matchesFilters = activeFilters.every((filter) => place.features.includes(filter));
@@ -254,58 +331,161 @@ export default function App() {
     setter(values.includes(value) ? values.filter((item) => item !== value) : [...values, value]);
   };
 
-  const toggleFavorite = (id: number) => {
-    setFavorites(favorites.includes(id) ? favorites.filter((item) => item !== id) : [...favorites, id]);
+  const toggleFavorite = async (id: number) => {
+    if (!user) { setAuthView("login"); return; }
+    const saved = favorites.includes(id);
+    setFavorites(saved ? favorites.filter((item) => item !== id) : [...favorites, id]);
+    // После запроса сверяемся с сервером: если он отказал, кнопка вернётся в прежнее состояние
+    try { await (saved ? removeFavorite(id) : addFavorite(id)); } catch { /* состояние поправит loadFavorites */ }
+    loadFavorites();
+  };
+
+  const submitReport = async () => {
+    if (!selected) return;
+    setReportSending(true);
+    setReportError(null);
+    try {
+      await sendReport(selected.id, reportText.trim());
+      setReportSent(true);
+      setReportText("");
+    } catch (e) {
+      setReportError(errorText(e));
+    } finally {
+      setReportSending(false);
+    }
+  };
+
+  const resetRoute = () => {
+    setRouteResult(null);
+    setMapRoute(null);
+    setRouteError(null);
   };
 
   const openPlace = (place: Place) => {
     setSelected(place);
     setRoutePanel(false);
-    setRouteShown(false);
+    resetRoute();
     setDetailExpanded(false);
+    setSheetOpen(false);
   };
 
   const closeDetail = () => {
     setSelected(null);
     setRoutePanel(false);
-    setRouteShown(false);
+    resetRoute();
   };
 
+  const openRoutePanel = () => {
+    setRoutePanel(true);
+    setRouteToText(selected?.name || "");
+  };
+
+  const pickAddress = (item: AddressSuggestion) => {
+    openPlace(addressPlace(item.name, item.address, item.lat, item.lon));
+    setQuery("");
+  };
+
+  const placeOptions = (text: string): AddressOption[] => {
+    const q = text.trim().toLowerCase();
+    if (!q) return [];
+    return sourcePlaces
+      .filter((place) => place.lat != null && place.lon != null && `${place.name} ${place.address}`.toLowerCase().includes(q))
+      .slice(0, 4)
+      .map((place) => ({ key: `place-${place.id}`, title: place.name, subtitle: place.address, kind: "place", lat: place.lat!, lon: place.lon!, placeId: place.id }));
+  };
+
+  const optionToPlace = (option: AddressOption): Place | null => {
+    if (option.lat == null || option.lon == null) return null;
+    return sourcePlaces.find((place) => place.id === option.placeId) ?? addressPlace(option.title, option.subtitle ?? null, option.lat, option.lon);
+  };
+
+  const buildRoute = async () => {
+    if (selected?.lat == null || selected?.lon == null) { setRouteError("Выберите из списка, куда нужно попасть"); return; }
+    if (!routeFrom) { setRouteError("Выберите из списка, откуда начинается маршрут"); return; }
+    resetRoute();
+    setRouteLoading(true);
+    try {
+      const from = routeFrom.kind === "me" ? await currentPosition() : { lat: routeFrom.lat!, lon: routeFrom.lon! };
+      const to = { lat: selected.lat, lon: selected.lon };
+      // 2GIS умеет исключать лестницы, остальные параметры уличный маршрут не учитывает
+      const result = await fetchOutdoorRoute(from, to, prefs.includes("noSteps") ? "no_stairs" : "default");
+      setRouteResult(result);
+      setMapRoute({ geometry: result.route.geometry, from, to });
+    } catch (e) {
+      setRouteError(e instanceof Error ? e.message : "Не удалось построить маршрут");
+    } finally {
+      setRouteLoading(false);
+    }
+  };
+
+  const mapPlaces = selectedIsAddress ? [...visiblePlaces, selected] : visiblePlaces;
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${selected && !routePanel ? "has-selection" : ""}`}>
       <aside className="sidebar">
         <div className="brand"><SeeWayLogo compact /></div>
         <nav aria-label="Основная навигация">
           <button className={!favoritesOnly && !routePanel ? "nav-item active" : "nav-item"} onClick={() => { setFavoritesOnly(false); closeDetail(); }}><Icon name="pin" /><span>Карта</span></button>
-          <button className={routePanel ? "nav-item active" : "nav-item"} onClick={() => { setFavoritesOnly(false); setRoutePanel(true); setSelected(selected || places[0]); }}><Icon name="route" /><span>Маршрут</span></button>
+          <button className={routePanel ? "nav-item active" : "nav-item"} onClick={() => { setFavoritesOnly(false); openRoutePanel(); }}><Icon name="route" /><span>Маршрут</span></button>
           <button className="nav-item sos-nav-item" onClick={() => { setSosOpen(true); setSosSent(false); }}><span className="sos-nav-icon">SOS</span><span>SOS</span></button>
           <button className={favoritesOnly ? "nav-item active" : "nav-item"} onClick={() => { setFavoritesOnly(true); setRoutePanel(false); setSelected(null); }}><Icon name="heart" /><span>Избранное</span><b>{favorites.length}</b></button>
-          <button className="nav-item" onClick={() => user ? setAuthView("profile") : setProfileMenu(true)}><Icon name="user" /><span>Профиль</span></button>
+          <button className="nav-item" onClick={() => user ? setAuthView("profile") : setProfileMenu(!profileMenu)}><Icon name="user" /><span>Профиль</span></button>
         </nav>
       </aside>
 
       <main>
-        <section className="results-panel map-info-panel" aria-label={routePanel ? "Планирование маршрута" : "Поиск и фильтры"}>
+        <section className={`results-panel map-info-panel ${sheetOpen ? "sheet-open" : ""}`} aria-label={routePanel ? "Планирование маршрута" : "Поиск и фильтры"}>
           <div className="panel-brand"><SeeWayLogo /><span className="panel-brand-slogan">Понятный путь для каждого</span></div>
           {routePanel ? (
             <div className="route-planner-panel">
               <div className="panel-title-row"><div><p className="eyebrow">РЕЖИМ МАРШРУТА</p><h1>Построить маршрут</h1></div><button className="plain-icon" onClick={closeDetail} aria-label="Закрыть"><Icon name="close" /></button></div>
-              <label className="route-field"><span className="route-point start" /><div><small>ОТКУДА</small><input defaultValue="Моё местоположение" aria-label="Откуда" /></div></label>
-              <label className="route-field"><span className="route-point finish" /><div><small>КУДА</small><input value={selected?.name || ""} onChange={(e) => setQuery(e.target.value)} placeholder="Выберите место на карте" aria-label="Куда" /></div></label>
+              <AddressInput
+                label="ОТКУДА"
+                point="start"
+                value={routeFromText}
+                placeholder="Адрес или место"
+                getNear={getNear}
+                localOptions={(text) => [...(!text.trim() || MY_LOCATION.title.toLowerCase().includes(text.trim().toLowerCase()) ? [MY_LOCATION] : []), ...placeOptions(text)]}
+                onChange={(text) => { setRouteFromText(text); setRouteFrom(null); }}
+                onPick={(option) => { setRouteFrom(option); setRouteFromText(option.title); resetRoute(); }}
+              />
+              <AddressInput
+                label="КУДА"
+                point="finish"
+                value={routeToText}
+                placeholder="Адрес, здание или организация"
+                getNear={getNear}
+                localOptions={placeOptions}
+                onChange={(text) => { setRouteToText(text); setSelected(null); resetRoute(); }}
+                onPick={(option) => { setSelected(optionToPlace(option)); setRouteToText(option.title); resetRoute(); }}
+              />
               <h2 className="panel-section-title">Параметры доступности</h2>
               {[["noSteps", "Без лестниц"], ["elevator", "Предпочитать лифты"], ["wide", "Избегать узких проходов"], ["ramp", "Предпочитать пандусы"]].map(([id, label]) => <label className="compact-filter" key={id}><input type="checkbox" checked={prefs.includes(id)} onChange={() => toggleItem(id, prefs, setPrefs)} /><span>{label}</span></label>)}
-              <button className="button full route-build-button" onClick={() => setRouteShown(true)} disabled={!selected}>Показать маршрут</button>
-              {routeShown && selected && (selected.route && selected.features.includes("verified") ? <div className="route-summary"><div><strong>14 мин</strong><span>920 м</span></div><p>Маршрут без лестниц подтверждён.</p><ul><li>{selected.entrance}</li><li>Непроверенных участков нет</li></ul></div> : <div className="route-alert"><Icon name="info" size={18} /><div><strong>Безбарьерный маршрут не подтверждён</strong><p>Недостаточно проверенных данных. Мы не будем предлагать неподтверждённый путь.</p></div></div>)}
+              <button className="button full route-build-button" onClick={buildRoute} disabled={routeLoading}>{routeLoading ? "Строим маршрут…" : "Показать маршрут"}</button>
+              {routeResult && <div className="route-summary" aria-live="polite">
+                <div><strong>{formatDuration(routeResult.route.duration_s)}</strong><span>{formatDistance(routeResult.route.distance_m)} · пешком, данные 2GIS</span></div>
+                {routeResult.notices.map((notice) => <p key={notice}>{notice}</p>)}
+                {routeResult.route.steps.length > 0 && <ol className="route-steps">{routeResult.route.steps.map((step, i) => <li key={i}>{step.text}{step.distance_m > 0 && !HAS_DISTANCE.test(step.text) && <small>{formatDistance(step.distance_m)}</small>}</li>)}</ol>}
+              </div>}
+              {routeError && <div className="route-alert" role="alert"><Icon name="info" size={18} /><div><strong>Маршрут не построен</strong><p>{routeError}</p></div></div>}
             </div>
           ) : (
             <div className="panel-scroll">
               <label className="search-box map-search"><Icon name="search" size={19} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск здания или адреса" aria-label="Поиск здания или адреса" /></label>
               <div className="panel-action-row">
-                <button className={filterOpen ? "panel-action active" : "panel-action"} onClick={() => setFilterOpen(!filterOpen)}><Icon name="filter" size={17} />Фильтры{activeFilters.length > 0 && <b>{activeFilters.length}</b>}</button>
+                <button className={filterOpen ? "panel-action active" : "panel-action"} onClick={() => { setFilterOpen(!filterOpen); if (!filterOpen) setSheetOpen(true); }}><Icon name="filter" size={17} />Фильтры{activeFilters.length > 0 && <b>{activeFilters.length}</b>}</button>
                 <button className={favoritesOnly ? "panel-action active" : "panel-action"} onClick={() => setFavoritesOnly(!favoritesOnly)}><Icon name="heart" size={17} />Избранное</button>
               </div>
               <div className="found-row"><span>{favoritesOnly ? "Избранные места" : `На карте: ${visiblePlaces.length}`}</span>{(activeFilters.length > 0 || activeCategories.length > 0) && <button onClick={() => { setActiveFilters([]); setActiveCategories([]); }}>Сбросить</button>}</div>
-              {(query || favoritesOnly) && <div className="compact-results">{visiblePlaces.map((place) => <button key={place.id} onClick={() => openPlace(place)}><span className={`result-marker ${place.state}`} /><div><strong>{place.name}</strong><small>{place.address}</small></div><Icon name="chevron" size={15} /></button>)}</div>}
+              {(query || favoritesOnly) && <div className="compact-results">{visiblePlaces.map((place) => <button key={place.id} onClick={() => openPlace(place)}><span className={`result-marker ${place.state}`} /><div><strong>{place.name}</strong><small>{place.address}</small></div><Icon name="chevron" size={15} /></button>)}
+                {!favoritesOnly && query.trim().length >= 2 && <>
+                  <p className="suggest-heading">Адреса и места · 2GIS</p>
+                  {searchSuggest.items.map((item) => <button key={item.id} onClick={() => pickAddress(item)}><span className="result-marker unknown" /><div><strong>{item.name}</strong>{item.address && <small>{item.address}</small>}</div><Icon name="chevron" size={15} /></button>)}
+                  {searchSuggest.loading && !searchSuggest.items.length && <p className="suggest-note">Ищем адреса…</p>}
+                  {!searchSuggest.loading && searchSuggest.error && <p className="suggest-note">{searchSuggest.error}</p>}
+                  {!searchSuggest.loading && !searchSuggest.error && !searchSuggest.items.length && <p className="suggest-note">Адресов не найдено</p>}
+                </>}
+              </div>}
               <section className="panel-section">
                 <h2>Категории зданий</h2>
                 <div className="category-list">{buildingCategories.map(([id, label]) => <button key={id} className={activeCategories.includes(id) ? "selected" : ""} onClick={() => toggleItem(id, activeCategories, setActiveCategories)}><span className="category-icon"><Icon name="building" size={17} /></span><span>{label}</span><Icon name="chevron" size={15} /></button>)}</div>
@@ -317,10 +497,13 @@ export default function App() {
               <div className="panel-legend"><h2>Обозначения на карте</h2><div><span><i className="legend-dot accessible" />Подтверждено</span><span><i className="legend-dot partial" />Есть ограничения</span><span><i className="legend-dot barrier" />Есть препятствия</span><span><i className="legend-dot unknown" />Нет данных</span></div><p>Статусы относятся к демонстрационным данным. Проверенные сведения отмечены отдельно.</p></div>
             </div>
           )}
+          <button className="sheet-toggle" onClick={() => setSheetOpen(!sheetOpen)} aria-expanded={sheetOpen}>
+            <span>{sheetOpen ? "Свернуть" : routePanel ? "Параметры маршрута" : "Категории и фильтры"}</span><Icon name="chevron" size={15} />
+          </button>
         </section>
 
         <section className="map-area" aria-label="Интерактивная карта">
-          <MapboxMap places={visiblePlaces} selected={selected} onSelect={openPlace} styleName={mapLayer} locationActive={locationActive} onMapReady={(map) => { (window as any).__seewayMap = map; }} />
+          <MapboxMap places={mapPlaces} selected={selected} onSelect={openPlace} styleName={mapLayer} locationActive={locationActive} route={mapRoute} onMapReady={(map) => { mapRef.current = map; (window as any).__seewayMap = map; }} />
           {!import.meta.env.VITE_MAPBOX_ACCESS_TOKEN && <div className="map-notice">Добавьте VITE_MAPBOX_ACCESS_TOKEN в Frontend/.env</div>}
           <div className="map-caption">SeeWay <span>{apiState === "ready" ? "Данные API" : apiState === "loading" ? "Загрузка зданий…" : "Демо-данные · API недоступен"}</span></div>
           <div className="map-top-controls">
@@ -328,7 +511,7 @@ export default function App() {
             <button className={locationActive ? "active" : ""} onClick={() => setLocationActive(!locationActive)} aria-label="Текущее местоположение"><Icon name="pin" size={18} /></button>
             <button onClick={() => user ? setAuthView("preferences") : setAuthView("login")} aria-label="Настройки"><Icon name="settings" size={18} /></button>
           </div>
-          {!selected && <button className="route-fab" onClick={() => { setSelected(places[0]); setRoutePanel(true); }}><Icon name="route" />Построить маршрут</button>}
+          {!selected && <button className="route-fab" onClick={openRoutePanel}><Icon name="route" />Построить маршрут</button>}
 
           {selected && !routePanel && (
             <aside className={`detail-panel map-place-card ${detailExpanded ? "expanded" : ""}`} aria-label={`Профиль: ${selected.name}`}>
@@ -336,15 +519,17 @@ export default function App() {
                 <div><span className="place-type">{selected.type}</span><h2>{selected.name}</h2><p>{selected.address}</p></div>
                 <button className="close-button" onClick={closeDetail} aria-label="Закрыть профиль"><Icon name="close" /></button>
               </div>
-              <div className="place-card-status"><Status state={selected.state} /><span>{selected.features.includes("verified") ? "Сведения подтверждены" : selectedIsFromApi ? "Данные API · доступность не указана" : "Демо · не проверено"}</span></div>
+              <div className="place-card-status"><Status state={selected.state} /><span>{selected.features.includes("verified") ? "Сведения подтверждены" : selectedIsAddress ? "Адрес из 2GIS · доступность не указана" : selectedIsFromApi ? "Данные API · доступность не указана" : "Демо · не проверено"}</span></div>
               <div className="quick-access-grid">
                 <div><small>ПАНДУС</small><strong>{selected.features.includes("ramp") ? (selected.state === "barrier" ? "Крутой уклон" : "Есть") : "Нет данных"}</strong></div>
                 <div><small>ЛИФТ</small><strong>{selected.features.includes("elevator") ? "Работает" : "Нет данных"}</strong></div>
                 <div><small>ВХОД</small><strong>{selected.entrance || "Не подтверждён"}</strong></div>
                 <div><small>ОБНОВЛЕНО</small><strong>{selected.updated}</strong></div>
               </div>
-              <div className="detail-actions three-actions"><button className="outline-button" onClick={() => setDetailExpanded(!detailExpanded)}>{detailExpanded ? "Свернуть" : "Подробнее"}</button><button className={`outline-button ${favorites.includes(selected.id) ? "saved-action" : ""}`} onClick={() => toggleFavorite(selected.id)}><Icon name="heart" size={16} />{favorites.includes(selected.id) ? "Сохранено" : "В избранное"}</button><button className="button route-card-button" onClick={() => setRoutePanel(true)}><Icon name="route" size={16} />Построить маршрут</button></div>
-              {detailExpanded && (selectedIsFromApi ? <div className="profile-content"><p>В API пока нет паспорта доступности для этого здания. Сведения о пандусах, лифтах и входах не указаны.</p></div> : <div className="profile-content">
+              <div className="detail-actions three-actions"><button className="outline-button" onClick={() => setDetailExpanded(!detailExpanded)}>{detailExpanded ? "Свернуть" : "Подробнее"}</button>{selectedIsFromApi && <button className={`outline-button ${favorites.includes(selected.id) ? "saved-action" : ""}`} onClick={() => toggleFavorite(selected.id)}><Icon name="heart" size={16} />{favorites.includes(selected.id) ? "Сохранено" : "В избранное"}</button>}<button className="button route-card-button" onClick={openRoutePanel}><Icon name="route" size={16} />Построить маршрут</button></div>
+              {detailExpanded && (selectedIsFromApi || selectedIsAddress ? <div className="profile-content"><p>В API пока нет паспорта доступности для этого здания. Сведения о пандусах, лифтах и входах не указаны.</p>
+                  {selectedIsFromApi && <button className="report-button" onClick={() => { setReportOpen(true); setReportSent(false); setReportError(null); }}><Icon name="report" size={18} />Сообщить об изменении</button>}
+                </div> : <div className="profile-content">
                   <Status state={selected.state} />
                   <p className="verification">{selected.features.includes("verified") ? "Проверено организацией · 12 мая 2025" : "Не проверено организацией"}</p>
                   <h3>Паспорт доступности</h3>
@@ -359,7 +544,6 @@ export default function App() {
                   <div className="photo-row"><div>ФОТО<br />ВХОДА</div><div>ФОТО<br />ПАНДУСА</div><button>+1</button></div>
                   <blockquote>«Вход удобный, но кнопка вызова расположена высоко.»<footer>Анна · 10 мая 2025 · не проверено</footer></blockquote>
                   <div className="recent-report"><div><Icon name="report" size={16} /><strong>Последнее сообщение</strong></div><p>«Доводчик на входной двери работает туго»</p><span>11 мая 2025 · <b>Не проверено</b></span></div>
-                  <button className="report-button" onClick={() => { setReportOpen(true); setReportSent(false); }}><Icon name="report" size={18} />Сообщить об изменении</button>
                 </div>)}
             </aside>
           )}
@@ -368,21 +552,21 @@ export default function App() {
 
       <div className="account-control">
         <button className="profile-trigger" onClick={() => setProfileMenu(!profileMenu)} aria-expanded={profileMenu} aria-label={user ? "Открыть меню профиля" : "Открыть меню входа"}>
-          <span className="profile-avatar">{user ? user.name.slice(0, 1).toUpperCase() : <Icon name="user" size={18} />}</span>
-          <span>{user ? user.name : "Войти"}</span>
+          <span className="profile-avatar">{user ? displayName(user).slice(0, 1).toUpperCase() : <Icon name="user" size={18} />}</span>
+          <span>{user ? displayName(user) : "Войти"}</span>
         </button>
         {profileMenu && (
           <div className="profile-menu">
             {user ? <>
-              <div className="profile-menu-user"><strong>{user.name}</strong><span>{user.email}</span></div>
+              <div className="profile-menu-user"><strong>{displayName(user)}</strong><span>{user.email}</span></div>
               <button onClick={() => { setAuthView("profile"); setProfileMenu(false); }}><Icon name="user" size={17} />Мой профиль</button>
               <button onClick={() => { setFavoritesOnly(true); setRoutePanel(false); setSelected(null); setAuthView(null); setProfileMenu(false); }}><Icon name="heart" size={17} />Избранное</button>
-              <button onClick={() => { setSelected(selected || places[0]); setRoutePanel(true); setAuthView(null); setProfileMenu(false); }}><Icon name="route" size={17} />Мои маршруты</button>
-              <button onClick={() => { setAuthView("profile"); setProfileMenu(false); }}><Icon name="report" size={17} />Мои отзывы</button>
+              <button onClick={() => { openRoutePanel(); setAuthView(null); setProfileMenu(false); }}><Icon name="route" size={17} />Построить маршрут</button>
+              <button onClick={() => { setAuthView("profile"); setProfileMenu(false); }}><Icon name="report" size={17} />Мои сообщения</button>
               <button onClick={() => { setAuthView("preferences"); setProfileMenu(false); }}><Icon name="settings" size={17} />Настройки доступности</button>
-              <button className="logout-menu-item" onClick={() => { setUser(null); setProfileMenu(false); setAuthView(null); }}><Icon name="logout" size={17} />Выйти</button>
+              <button className="logout-menu-item" onClick={() => { signOut(); setProfileMenu(false); setAuthView(null); }}><Icon name="logout" size={17} />Выйти</button>
             </> : <>
-              <p>Войдите, чтобы сохранять маршруты и места.</p>
+              <p>Войдите, чтобы сохранять места и настройки доступности.</p>
               <button onClick={() => { setAuthView("login"); setProfileMenu(false); }}><Icon name="user" size={17} />Войти</button>
               <button className="menu-primary" onClick={() => { setAuthView("register"); setProfileMenu(false); }}><Icon name="plus" size={17} />Регистрация</button>
             </>}
@@ -395,16 +579,16 @@ export default function App() {
           key={authView}
           view={authView}
           user={user}
-          prototypeAccount={prototypeAccount}
-          preferences={accountPrefs}
-          favoritePlaces={places.filter((place) => favorites.includes(place.id))}
-          hasSavedRoute={routeShown}
-          onClose={() => setAuthView(null)}
+          favoriteBuildings={favoriteBuildings}
+          resetToken={resetToken}
+          onClose={() => {
+            setAuthView(null);
+            if (resetToken) { setResetToken(null); window.history.replaceState(null, "", "/"); }
+          }}
           onChangeView={setAuthView}
-          onRegister={(newUser, password) => { setUser(newUser); setPrototypeAccount({ name: newUser.name, email: newUser.email, password }); }}
-          onLogin={(loggedInUser) => { setUser(loggedInUser); setAuthView(null); setFavoritesOnly(false); }}
-          onUpdateUser={setUser}
-          onUpdatePreferences={setAccountPrefs}
+          onSignIn={signIn}
+          onLoggedIn={() => { setAuthView(null); setFavoritesOnly(false); }}
+          onUserChange={applyUser}
         />
       )}
 
@@ -412,14 +596,14 @@ export default function App() {
         <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setReportOpen(false); }}>
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="report-title">
             <div className="modal-head"><div><p className="eyebrow">ОБНОВЛЕНИЕ ДАННЫХ</p><h2 id="report-title">Сообщить об изменении</h2></div><button className="close-button" onClick={() => setReportOpen(false)} aria-label="Закрыть"><Icon name="close" /></button></div>
-            {reportSent ? <div className="confirmation"><div className="confirmation-icon"><Icon name="check" size={28} /></div><h3>Сообщение отправлено</h3><p>Спасибо. Оно появится в профиле со статусом «Не проверено». Мы не считаем данные подтверждёнными до проверки.</p><button className="button" onClick={() => setReportOpen(false)}>Готово</button></div> : <>
+            {reportSent ? <div className="confirmation"><div className="confirmation-icon"><Icon name="check" size={28} /></div><h3>Сообщение отправлено</h3><p>Спасибо. {user ? "Оно появится в вашем профиле со статусом «Не проверено»." : "Его увидят редакторы."} Мы не считаем данные подтверждёнными до проверки.</p><button className="button" onClick={() => setReportOpen(false)}>Готово</button></div> : <>
               <p className="modal-place">{selected.name}<br /><span>{selected.address}</span></p>
               <label className="field-label">Что изменилось?</label>
               <div className="issue-chips"><button onClick={() => setReportText("Не работает лифт")}>Не работает лифт</button><button onClick={() => setReportText("Вход заблокирован")}>Вход заблокирован</button><button onClick={() => setReportText("Пандус слишком крутой")}>Крутой пандус</button></div>
-              <textarea value={reportText} onChange={(e) => setReportText(e.target.value)} placeholder="Коротко опишите ситуацию" rows={5} />
-              <label className="upload"><input type="file" accept="image/*" /><Icon name="plus" /><span><b>Добавить фото</b><small>Необязательно, JPG или PNG</small></span></label>
-              <div className="unverified-note"><Icon name="info" size={18} /><span>Сообщение будет опубликовано как неподтверждённое до проверки.</span></div>
-              <button className="button full" disabled={!reportText.trim()} onClick={() => setReportSent(true)}>Отправить сообщение</button>
+              <textarea value={reportText} onChange={(e) => setReportText(e.target.value)} placeholder="Коротко опишите ситуацию" rows={5} maxLength={2000} />
+              <div className="unverified-note"><Icon name="info" size={18} /><span>Сообщение попадёт к редакторам и не влияет на маршруты, пока его не проверят.</span></div>
+              {reportError && <div className="form-error" role="alert">{reportError}</div>}
+              <button className="button full" disabled={reportText.trim().length < 3 || reportSending} onClick={submitReport}>{reportSending ? "Отправляем…" : "Отправить сообщение"}</button>
             </>}
           </div>
         </div>
@@ -495,32 +679,29 @@ function AccessRow({ label, value, known, date }: { label: string; value: string
   return <div className="access-row"><div className={`access-symbol ${known ? "known" : ""}`}>{known ? <Icon name="check" size={17} /> : "?"}</div><div><strong>{label}</strong><span>{value}</span><small>{known ? `Обновлено: ${date}` : "Нет проверенных сведений"}</small></div></div>;
 }
 
+const reportStatusText: Record<ApiReport["status"], string> = { new: "Не проверено", confirmed: "Подтверждено", rejected: "Отклонено" };
+const formatDate = (iso: string) => new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
+
 function AuthScreen({
   view,
   user,
-  prototypeAccount,
-  preferences,
-  favoritePlaces,
-  hasSavedRoute,
+  favoriteBuildings,
+  resetToken,
   onClose,
   onChangeView,
-  onRegister,
-  onLogin,
-  onUpdateUser,
-  onUpdatePreferences,
+  onSignIn,
+  onLoggedIn,
+  onUserChange,
 }: {
   view: Exclude<AuthView, null>;
-  user: PrototypeUser | null;
-  prototypeAccount: { name: string; email: string; password: string } | null;
-  preferences: string[];
-  favoritePlaces: Place[];
-  hasSavedRoute: boolean;
+  user: ApiUser | null;
+  favoriteBuildings: ApiBuilding[];
+  resetToken: string | null;
   onClose: () => void;
   onChangeView: (view: AuthView) => void;
-  onRegister: (user: PrototypeUser, password: string) => void;
-  onLogin: (user: PrototypeUser) => void;
-  onUpdateUser: (user: PrototypeUser) => void;
-  onUpdatePreferences: (prefs: string[]) => void;
+  onSignIn: (token: string, remember: boolean) => Promise<ApiUser>;
+  onLoggedIn: () => void;
+  onUserChange: (user: ApiUser) => void;
 }) {
   const [name, setName] = useState(user?.name || "");
   const [email, setEmail] = useState(user?.email || "");
@@ -530,47 +711,89 @@ function AuthScreen({
   const [remember, setRemember] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
   const [registrationStep, setRegistrationStep] = useState<"form" | "success" | "preferences">("form");
-  const [recoverySent, setRecoverySent] = useState(false);
+  const [recoverySent, setRecoverySent] = useState<string | null>(null);
+  const [resetDone, setResetDone] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [draftPrefs, setDraftPrefs] = useState(preferences);
-  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const [draftPrefs, setDraftPrefs] = useState<string[]>(user?.accessibility_prefs ?? []);
+  const [reports, setReports] = useState<ApiReport[] | null>(null);
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+  useEffect(() => {
+    if (view === "profile" && user) getMyReports().then(setReports).catch(() => setReports([]));
+  }, [view, user?.id]);
+
+  // Общая обёртка для запросов формы: блокирует кнопку и показывает ошибку сервера над формой
+  const submit = async (action: () => Promise<void>) => {
+    setBusy(true);
+    try { await action(); } catch (e) { setErrors({ form: errorText(e) }); } finally { setBusy(false); }
+  };
+
+  const passwordError = (value: string) =>
+    !value ? "Введите пароль." : value.length < PASSWORD_MIN ? `Минимум ${PASSWORD_MIN} символов.` : value.length > 128 ? "Не длиннее 128 символов." : undefined;
 
   const validateRegistration = () => {
     const next: Record<string, string> = {};
     if (!name.trim()) next.name = "Укажите имя.";
+    else if (name.trim().length > 100) next.name = "Не длиннее 100 символов.";
     if (!email.trim()) next.email = "Укажите электронную почту.";
     else if (!emailValid) next.email = "Введите корректный адрес электронной почты.";
-    if (!password) next.password = "Введите пароль.";
-    else if (password.length < 8 || !/[A-ZА-Я]/.test(password) || !/[a-zа-я]/.test(password) || !/\d/.test(password)) next.password = "Минимум 8 символов, заглавная и строчная буквы, цифра.";
+    const pwError = passwordError(password);
+    if (pwError) next.password = pwError;
     if (!repeatPassword) next.repeatPassword = "Повторите пароль.";
     else if (password !== repeatPassword) next.repeatPassword = "Пароли не совпадают.";
     if (!accepted) next.accepted = "Необходимо принять условия использования.";
     setErrors(next);
-    if (Object.keys(next).length === 0) {
-      onRegister({ name: name.trim(), email: email.trim() }, password);
+    if (Object.keys(next).length === 0) submit(async () => {
+      const token = await register(name.trim(), email.trim(), password);
+      await onSignIn(token, true);
       setRegistrationStep("success");
-    }
+    });
   };
 
   const validateLogin = () => {
     const next: Record<string, string> = {};
     if (!email.trim()) next.email = "Укажите электронную почту.";
     if (!password) next.password = "Введите пароль.";
-    if (Object.keys(next).length === 0) {
-      const matchesPrototype = prototypeAccount && email.trim().toLowerCase() === prototypeAccount.email.toLowerCase() && password === prototypeAccount.password;
-      const matchesDemo = email.trim().toLowerCase() === "demo@dostupno.ru" && password === "Demo1234";
-      if (!matchesPrototype && !matchesDemo) next.credentials = "Неверная электронная почта или пароль.";
-      else onLogin(matchesPrototype && prototypeAccount ? { name: prototypeAccount.name, email: prototypeAccount.email } : { name: "Анна", email: "demo@dostupno.ru" });
-    }
     setErrors(next);
+    if (Object.keys(next).length === 0) submit(async () => {
+      const token = await login(email.trim(), password);
+      await onSignIn(token, remember);
+      onLoggedIn();
+    });
   };
 
   const sendRecovery = () => {
     if (!email.trim()) setErrors({ email: "Укажите электронную почту." });
     else if (!emailValid) setErrors({ email: "Введите корректный адрес электронной почты." });
-    else { setErrors({}); setRecoverySent(true); }
+    else { setErrors({}); submit(async () => setRecoverySent((await forgotPassword(email.trim())).detail)); }
   };
+
+  const sendNewPassword = () => {
+    const next: Record<string, string> = {};
+    const pwError = passwordError(password);
+    if (pwError) next.password = pwError;
+    if (password !== repeatPassword) next.repeatPassword = "Пароли не совпадают.";
+    setErrors(next);
+    if (Object.keys(next).length === 0 && resetToken) submit(async () => { await resetPassword(resetToken, password); setResetDone(true); });
+  };
+
+  const saveProfile = () => {
+    const next: Record<string, string> = {};
+    if (!name.trim()) next.name = "Укажите имя.";
+    if (!emailValid) next.email = "Введите корректный адрес электронной почты.";
+    setErrors(next);
+    if (Object.keys(next).length === 0) submit(async () => {
+      onUserChange(await updateMe({ name: name.trim(), email: email.trim() }));
+      setEditing(false);
+    });
+  };
+
+  const savePreferences = () => submit(async () => {
+    onUserChange(await updateMe({ accessibility_prefs: draftPrefs }));
+    onClose();
+  });
 
   const togglePref = (id: string) => setDraftPrefs(draftPrefs.includes(id) ? draftPrefs.filter((item) => item !== id) : [...draftPrefs, id]);
   const prefOptions = [
@@ -580,6 +803,7 @@ function AuthScreen({
     ["ramp", "Мне нужен удобный пандус."],
     ["toilet", "Мне нужен доступный туалет."],
   ];
+  const formError = errors.form && <div className="form-error" role="alert">{errors.form}</div>;
 
   return (
     <div className="auth-overlay">
@@ -588,58 +812,68 @@ function AuthScreen({
         <button className="close-button auth-close" onClick={onClose} aria-label="Закрыть"><Icon name="close" /></button>
 
         {view === "register" && registrationStep === "form" && <div className="auth-content">
-          <AuthHeading title="Создать аккаунт" subtitle="Зарегистрируйтесь, чтобы сохранять маршруты и находить доступные места." />
-          <div className="prototype-banner"><Icon name="info" size={18} /><span><b>Демонстрационный режим.</b> Реальный аккаунт не создаётся, данные существуют только в этой сессии.</span></div>
+          <AuthHeading title="Создать аккаунт" subtitle="Зарегистрируйтесь, чтобы сохранять места и настройки доступности." />
+          {formError}
           <AuthField id="reg-name" label="Имя" value={name} onChange={setName} error={errors.name} autoComplete="name" />
           <AuthField id="reg-email" label="Электронная почта" value={email} onChange={setEmail} error={errors.email} type="email" autoComplete="email" />
-          <PasswordField id="reg-password" label="Пароль" value={password} onChange={setPassword} error={errors.password} visible={showPassword} onToggle={() => setShowPassword(!showPassword)} autoComplete="new-password" />
+          <PasswordField id="reg-password" label={`Пароль (от ${PASSWORD_MIN} символов)`} value={password} onChange={setPassword} error={errors.password} visible={showPassword} onToggle={() => setShowPassword(!showPassword)} autoComplete="new-password" />
           <PasswordField id="reg-repeat" label="Повторите пароль" value={repeatPassword} onChange={setRepeatPassword} error={errors.repeatPassword} visible={showPassword} onToggle={() => setShowPassword(!showPassword)} autoComplete="new-password" />
           <label className={`auth-check ${errors.accepted ? "has-error" : ""}`}><input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} /><span>Я согласен(на) с условиями использования и политикой конфиденциальности.</span></label>
           {errors.accepted && <span className="field-error">{errors.accepted}</span>}
-          <button className="button full auth-primary" onClick={validateRegistration}>Зарегистрироваться</button>
+          <button className="button full auth-primary" onClick={validateRegistration} disabled={busy}>{busy ? "Создаём аккаунт…" : "Зарегистрироваться"}</button>
           <p className="auth-switch">Уже есть аккаунт? <button onClick={() => onChangeView("login")}>Войти</button></p>
         </div>}
 
         {view === "register" && registrationStep === "success" && <div className="auth-content auth-result">
           <div className="result-round"><Icon name="check" size={30} /></div>
-          <h1>Аккаунт успешно создан!</h1>
-          <p>Это демонстрационный аккаунт текущей сессии. Теперь можно настроить необязательные предпочтения или перейти к карте.</p>
+          <h1>Аккаунт создан!</h1>
+          <p>Вы уже вошли. Можно указать, что важно для вас на маршруте, или сразу перейти к карте.</p>
           <button className="button full auth-primary" onClick={() => setRegistrationStep("preferences")}>Настроить доступность</button>
           <button className="outline-button full auth-secondary" onClick={onClose}>Пропустить и перейти к карте</button>
         </div>}
 
-        {view === "register" && registrationStep === "preferences" && <PreferencesContent prefs={draftPrefs} options={prefOptions} onToggle={togglePref} onSave={() => { onUpdatePreferences(draftPrefs); onClose(); }} onSkip={onClose} />}
+        {view === "register" && registrationStep === "preferences" && <PreferencesContent prefs={draftPrefs} options={prefOptions} onToggle={togglePref} onSave={savePreferences} onSkip={onClose} busy={busy} error={errors.form} />}
 
         {view === "login" && <div className="auth-content">
           <AuthHeading title="С возвращением!" subtitle="Войдите, чтобы продолжить пользоваться сервисом." />
-          <div className="prototype-banner"><Icon name="info" size={18} /><span>Прототип входа. Для демо: <b>demo@dostupno.ru</b> / <b>Demo1234</b></span></div>
-          {errors.credentials && <div className="form-error" role="alert">{errors.credentials}</div>}
+          {formError}
           <AuthField id="login-email" label="Электронная почта" value={email} onChange={setEmail} error={errors.email} type="email" autoComplete="email" />
           <PasswordField id="login-password" label="Пароль" value={password} onChange={setPassword} error={errors.password} visible={showPassword} onToggle={() => setShowPassword(!showPassword)} autoComplete="current-password" />
           <div className="auth-row"><label className="auth-check compact"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /><span>Запомнить меня</span></label><button className="auth-link" onClick={() => onChangeView("recovery")}>Забыли пароль?</button></div>
-          <button className="button full auth-primary" onClick={validateLogin}>Войти</button>
+          <button className="button full auth-primary" onClick={validateLogin} disabled={busy}>{busy ? "Входим…" : "Войти"}</button>
           <p className="auth-switch">Нет аккаунта? <button onClick={() => onChangeView("register")}>Зарегистрироваться</button></p>
         </div>}
 
         {view === "recovery" && <div className="auth-content">
           <AuthHeading title="Восстановление пароля" subtitle="Введите электронную почту, указанную при регистрации." />
           {!recoverySent ? <>
+            {formError}
             <AuthField id="recovery-email" label="Электронная почта" value={email} onChange={setEmail} error={errors.email} type="email" autoComplete="email" />
-            <button className="button full auth-primary" onClick={sendRecovery}>Отправить ссылку для восстановления</button>
+            <button className="button full auth-primary" onClick={sendRecovery} disabled={busy}>{busy ? "Отправляем…" : "Отправить ссылку для восстановления"}</button>
             <p className="auth-switch"><button onClick={() => onChangeView("login")}>Вернуться ко входу</button></p>
-          </> : <div className="auth-result inline-result"><div className="result-round"><Icon name="check" size={28} /></div><h2>Проверьте почту</h2><p>В рабочем сервисе ссылка для восстановления была бы отправлена на <b>{email}</b>. В этом прототипе письмо не отправляется.</p><button className="button full auth-primary" onClick={() => onChangeView("login")}>Вернуться ко входу</button></div>}
+          </> : <div className="auth-result inline-result"><div className="result-round"><Icon name="check" size={28} /></div><h2>Проверьте почту</h2><p>{recoverySent}. Адрес: <b>{email.trim()}</b>.</p><button className="button full auth-primary" onClick={() => onChangeView("login")}>Вернуться ко входу</button></div>}
         </div>}
 
-        {view === "preferences" && <PreferencesContent prefs={draftPrefs} options={prefOptions} onToggle={togglePref} onSave={() => { onUpdatePreferences(draftPrefs); onClose(); }} onSkip={onClose} />}
+        {view === "reset" && <div className="auth-content">
+          <AuthHeading title="Новый пароль" subtitle="Придумайте новый пароль для входа в SeeWay." />
+          {!resetDone ? <>
+            {formError}
+            <PasswordField id="reset-password" label={`Новый пароль (от ${PASSWORD_MIN} символов)`} value={password} onChange={setPassword} error={errors.password} visible={showPassword} onToggle={() => setShowPassword(!showPassword)} autoComplete="new-password" />
+            <PasswordField id="reset-repeat" label="Повторите пароль" value={repeatPassword} onChange={setRepeatPassword} error={errors.repeatPassword} visible={showPassword} onToggle={() => setShowPassword(!showPassword)} autoComplete="new-password" />
+            <button className="button full auth-primary" onClick={sendNewPassword} disabled={busy || !resetToken}>{busy ? "Сохраняем…" : "Сохранить пароль"}</button>
+            <p className="auth-switch"><button onClick={() => onChangeView("recovery")}>Запросить новую ссылку</button></p>
+          </> : <div className="auth-result inline-result"><div className="result-round"><Icon name="check" size={28} /></div><h2>Пароль изменён</h2><p>Теперь можно войти с новым паролем.</p><button className="button full auth-primary" onClick={() => onChangeView("login")}>Войти</button></div>}
+        </div>}
+
+        {view === "preferences" && <PreferencesContent prefs={draftPrefs} options={prefOptions} onToggle={togglePref} onSave={savePreferences} onSkip={onClose} busy={busy} error={errors.form} />}
 
         {view === "profile" && user && <div className="profile-page">
           <AuthHeading title="Мой профиль" subtitle="Личные данные и сохранённая информация." />
-          <div className="profile-summary"><div className="large-avatar">{user.name.slice(0, 1).toUpperCase()}</div><div><strong>{user.name}</strong><span>{user.email}</span></div><button className="outline-button" onClick={() => setEditing(!editing)}>{editing ? "Отменить" : "Редактировать"}</button></div>
-          {editing && <div className="profile-edit"><AuthField id="profile-name" label="Имя" value={name} onChange={setName} /><AuthField id="profile-email" label="Электронная почта" value={email} onChange={setEmail} type="email" /><button className="button" onClick={() => { if (name.trim() && emailValid) { onUpdateUser({ name: name.trim(), email: email.trim() }); setEditing(false); } }}>Сохранить изменения</button></div>}
-          <section className="profile-section"><div className="profile-section-head"><h2>Настройки доступности</h2><button onClick={() => onChangeView("preferences")}>Изменить</button></div><div className="preference-tags">{preferences.length ? preferences.map((id) => <span key={id}>{prefOptions.find(([key]) => key === id)?.[1]}</span>) : <p>Предпочтения пока не настроены.</p>}</div></section>
-          <section className="profile-section"><h2>Сохранённые здания</h2>{favoritePlaces.length ? favoritePlaces.map((place) => <div className="profile-list-item" key={place.id}><Icon name="building" /><div><strong>{place.name}</strong><span>{place.address}</span></div></div>) : <p className="profile-empty">Нет сохранённых зданий.</p>}</section>
-          <section className="profile-section"><h2>Сохранённые маршруты</h2>{hasSavedRoute ? <div className="profile-list-item"><Icon name="route" /><div><strong>Маршрут до выбранного места</strong><span>Без лестниц · сохранён в этой сессии</span></div></div> : <p className="profile-empty">Сохранённых маршрутов пока нет.</p>}</section>
-          <section className="profile-section"><h2>Мои отзывы и сообщения</h2><div className="profile-list-item"><Icon name="report" /><div><strong>Сообщение о доступности</strong><span>11 мая 2025 · Не проверено</span></div></div></section>
+          <div className="profile-summary"><div className="large-avatar">{displayName(user).slice(0, 1).toUpperCase()}</div><div><strong>{displayName(user)}</strong><span>{user.email}</span></div><button className="outline-button" onClick={() => { setEditing(!editing); setErrors({}); setName(user.name || ""); setEmail(user.email); }}>{editing ? "Отменить" : "Редактировать"}</button></div>
+          {editing && <div className="profile-edit">{formError}<AuthField id="profile-name" label="Имя" value={name} onChange={setName} error={errors.name} /><AuthField id="profile-email" label="Электронная почта" value={email} onChange={setEmail} error={errors.email} type="email" /><button className="button" onClick={saveProfile} disabled={busy}>{busy ? "Сохраняем…" : "Сохранить изменения"}</button></div>}
+          <section className="profile-section"><div className="profile-section-head"><h2>Настройки доступности</h2><button onClick={() => onChangeView("preferences")}>Изменить</button></div><div className="preference-tags">{user.accessibility_prefs.length ? user.accessibility_prefs.map((id) => <span key={id}>{prefOptions.find(([key]) => key === id)?.[1]}</span>) : <p>Предпочтения пока не настроены.</p>}</div></section>
+          <section className="profile-section"><h2>Сохранённые здания</h2>{favoriteBuildings.length ? favoriteBuildings.map((building) => <div className="profile-list-item" key={building.id}><Icon name="building" /><div><strong>{building.name}</strong><span>{building.address || "Адрес не указан"}</span></div></div>) : <p className="profile-empty">Нет сохранённых зданий.</p>}</section>
+          <section className="profile-section"><h2>Мои сообщения</h2>{reports === null ? <p className="profile-empty">Загружаем…</p> : reports.length ? reports.map((report) => <div className="profile-list-item" key={report.id}><Icon name="report" /><div><strong>{report.text}</strong><span>{report.building_name || "Здание"} · {formatDate(report.created_at)} · {reportStatusText[report.status]}</span></div></div>) : <p className="profile-empty">Вы ещё не отправляли сообщений о доступности.</p>}</section>
         </div>}
       </div>
     </div>
@@ -658,6 +892,6 @@ function PasswordField({ id, label, value, onChange, error, visible, onToggle, a
   return <div className={`auth-field ${error ? "has-error" : ""}`}><label htmlFor={id}>{label}</label><div className="password-input"><input id={id} value={value} onChange={(e) => onChange(e.target.value)} type={visible ? "text" : "password"} autoComplete={autoComplete} aria-invalid={!!error} aria-describedby={error ? `${id}-error` : undefined} /><button onClick={onToggle} type="button" aria-label={visible ? "Скрыть пароль" : "Показать пароль"}><Icon name="eye" size={18} /></button></div>{error && <span className="field-error" id={`${id}-error`} role="alert">{error}</span>}</div>;
 }
 
-function PreferencesContent({ prefs, options, onToggle, onSave, onSkip }: { prefs: string[]; options: string[][]; onToggle: (id: string) => void; onSave: () => void; onSkip: () => void }) {
-  return <div className="auth-content"><AuthHeading title="Настройки доступности" subtitle="Выберите только то, что удобно вам. Эти сведения необязательны, их можно изменить позже." /><div className="privacy-note"><Icon name="info" size={18} /><span>Мы не просим указывать инвалидность или медицинскую информацию.</span></div><div className="auth-preferences">{options.map(([id, label]) => <label key={id}><input type="checkbox" checked={prefs.includes(id)} onChange={() => onToggle(id)} /><span>{label}</span></label>)}</div><button className="button full auth-primary" onClick={onSave}>Сохранить и перейти к карте</button><button className="outline-button full auth-secondary" onClick={onSkip}>Пропустить</button></div>;
+function PreferencesContent({ prefs, options, onToggle, onSave, onSkip, busy, error }: { prefs: string[]; options: string[][]; onToggle: (id: string) => void; onSave: () => void; onSkip: () => void; busy: boolean; error?: string }) {
+  return <div className="auth-content"><AuthHeading title="Настройки доступности" subtitle="Выберите только то, что удобно вам. Эти сведения необязательны, их можно изменить позже." /><div className="privacy-note"><Icon name="info" size={18} /><span>Мы не просим указывать инвалидность или медицинскую информацию.</span></div>{error && <div className="form-error" role="alert">{error}</div>}<div className="auth-preferences">{options.map(([id, label]) => <label key={id}><input type="checkbox" checked={prefs.includes(id)} onChange={() => onToggle(id)} /><span>{label}</span></label>)}</div><button className="button full auth-primary" onClick={onSave} disabled={busy}>{busy ? "Сохраняем…" : "Сохранить и перейти к карте"}</button><button className="outline-button full auth-secondary" onClick={onSkip}>Пропустить</button></div>;
 }

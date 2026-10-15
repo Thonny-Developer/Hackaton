@@ -20,7 +20,8 @@ async def create_user(data: UserCreate, session: SessionDep, _: AdminUser):
     email = data.email.lower()
     if await session.scalar(select(User.id).where(func.lower(User.email) == email)):
         raise HTTPException(status.HTTP_409_CONFLICT, "Пользователь с таким email уже есть")
-    user = User(email=email, password_hash=hash_password(data.password), role=data.role, is_active=True)
+    user = User(email=email, name=data.name, password_hash=hash_password(data.password), role=data.role,
+                is_active=True)
     session.add(user)
     await session.commit()
     return user

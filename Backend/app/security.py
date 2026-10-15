@@ -1,3 +1,4 @@
+import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -38,6 +39,38 @@ def create_access_token(user: User) -> tuple[str, int]:
     return jwt.encode(payload, s.jwt_secret, algorithm="HS256"), ttl
 
 
+RESET_PURPOSE = "password_reset"
+
+
+def _password_fingerprint(user: User) -> str:
+    # После смены пароля отпечаток меняется, и старая ссылка сброса перестаёт работать
+    return hashlib.sha256(user.password_hash.encode()).hexdigest()[:16]
+
+
+def create_reset_token(user: User) -> str:
+    s = get_settings()
+    now = datetime.now(UTC)
+    payload = {"sub": str(user.id), "purpose": RESET_PURPOSE, "fp": _password_fingerprint(user),
+               "iat": now, "exp": now + timedelta(minutes=s.password_reset_ttl_minutes)}
+    return jwt.encode(payload, s.jwt_secret, algorithm="HS256")
+
+
+def check_reset_token(token: str) -> tuple[int, str] | None:
+    """Возвращает (user_id, отпечаток пароля) или None, если токен недействителен."""
+    try:
+        payload = jwt.decode(token, get_settings().jwt_secret, algorithms=["HS256"],
+                             options={"require": ["exp", "sub", "purpose", "fp"]})
+        if payload["purpose"] != RESET_PURPOSE:
+            return None
+        return int(payload["sub"]), payload["fp"]
+    except (jwt.PyJWTError, ValueError):
+        return None
+
+
+def reset_token_matches(user: User, fp: str) -> bool:
+    return user.is_active and _password_fingerprint(user) == fp
+
+
 _unauthorized = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
     detail="Требуется авторизация",
@@ -54,6 +87,9 @@ async def get_current_user(
     try:
         payload = jwt.decode(token, get_settings().jwt_secret, algorithms=["HS256"], options={"require": ["exp", "sub"]})
         user_id = int(payload["sub"])
+        # Токен сброса пароля не даёт доступа к API
+        if payload.get("purpose"):
+            raise ValueError
     except (jwt.PyJWTError, ValueError):
         raise _unauthorized from None
     # Пользователя перечитываем из БД, чтобы отключение аккаунта или смена роли работали сразу
@@ -61,6 +97,14 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise _unauthorized
     return user
+
+
+async def get_optional_user(
+    token: Annotated[str | None, Depends(oauth2_scheme)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> User | None:
+    """Для публичных эндпоинтов: без токена None, с недействительным токеном 401."""
+    return await get_current_user(token, session) if token else None
 
 
 def require_role(*roles: Role):
@@ -72,5 +116,7 @@ def require_role(*roles: Role):
     return checker
 
 
+CurrentUser = Annotated[User, Depends(get_current_user)]
+OptionalUser = Annotated[User | None, Depends(get_optional_user)]
 EditorUser = Annotated[User, Depends(require_role(Role.admin, Role.editor))]
 AdminUser = Annotated[User, Depends(require_role(Role.admin))]

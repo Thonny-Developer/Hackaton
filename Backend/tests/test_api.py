@@ -249,5 +249,12 @@ async def test_integrations_status(client):
     assert (await client.get("/integrations/status")).json() == {"dgis": False, "ors": False}
 
 
+async def test_geo_without_key_is_unavailable(client):
+    assert (await client.get("/geo/suggest", params={"q": "абай"})).status_code == 503
+    r = await client.post("/route/outdoor", json={"from_location": {"lat": 51.09, "lon": 71.41},
+                                                  "to_location": {"lat": 51.08, "lon": 71.42}})
+    assert r.status_code == 503
+
+
 async def test_dgis_search_needs_editor(client):
     assert (await client.get("/integrations/2gis/buildings", params={"q": "college"})).status_code == 401
