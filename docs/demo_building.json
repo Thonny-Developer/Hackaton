@@ -1,0 +1,577 @@
+{
+  "name": "Колледж Sapa (демо)",
+  "address": "Астана, демо-адрес",
+  "description": "Демонстрационное здание: 3 этажа, лифт, лестница, пандус, подъёмник",
+  "lat": 51.09092,
+  "lon": 71.41835,
+  "graph": {
+    "floors": [
+      {
+        "key": "f1",
+        "level": 1,
+        "name": "1 этаж",
+        "meters_per_px": 0.05,
+        "height_m": 3.6
+      },
+      {
+        "key": "f2",
+        "level": 2,
+        "name": "2 этаж",
+        "meters_per_px": 0.05,
+        "height_m": 3.6
+      },
+      {
+        "key": "f3",
+        "level": 3,
+        "name": "3 этаж",
+        "meters_per_px": 0.05,
+        "height_m": 3.6
+      }
+    ],
+    "nodes": [
+      {
+        "key": "c1_w",
+        "floor": "f1",
+        "type": "corridor",
+        "x": 100,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "c1_st",
+        "floor": "f1",
+        "type": "corridor",
+        "x": 300,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "c1_mid",
+        "floor": "f1",
+        "type": "corridor",
+        "x": 500,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "c1_wc",
+        "floor": "f1",
+        "type": "corridor",
+        "x": 700,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "c1_e",
+        "floor": "f1",
+        "type": "corridor",
+        "x": 900,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "st1",
+        "floor": "f1",
+        "type": "stairs",
+        "x": 300,
+        "y": 200,
+        "name": "Лестница",
+        "ref": null
+      },
+      {
+        "key": "el1",
+        "floor": "f1",
+        "type": "elevator",
+        "x": 960,
+        "y": 300,
+        "name": "Лифт",
+        "ref": null
+      },
+      {
+        "key": "c2_w",
+        "floor": "f2",
+        "type": "corridor",
+        "x": 100,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "c2_st",
+        "floor": "f2",
+        "type": "corridor",
+        "x": 300,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "c2_mid",
+        "floor": "f2",
+        "type": "corridor",
+        "x": 500,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "c2_wc",
+        "floor": "f2",
+        "type": "corridor",
+        "x": 700,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "c2_e",
+        "floor": "f2",
+        "type": "corridor",
+        "x": 900,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "st2",
+        "floor": "f2",
+        "type": "stairs",
+        "x": 300,
+        "y": 200,
+        "name": "Лестница",
+        "ref": null
+      },
+      {
+        "key": "el2",
+        "floor": "f2",
+        "type": "elevator",
+        "x": 960,
+        "y": 300,
+        "name": "Лифт",
+        "ref": null
+      },
+      {
+        "key": "c3_w",
+        "floor": "f3",
+        "type": "corridor",
+        "x": 100,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "c3_st",
+        "floor": "f3",
+        "type": "corridor",
+        "x": 300,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "c3_mid",
+        "floor": "f3",
+        "type": "corridor",
+        "x": 500,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "c3_wc",
+        "floor": "f3",
+        "type": "corridor",
+        "x": 700,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "c3_e",
+        "floor": "f3",
+        "type": "corridor",
+        "x": 900,
+        "y": 300,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "st3",
+        "floor": "f3",
+        "type": "stairs",
+        "x": 300,
+        "y": 200,
+        "name": "Лестница",
+        "ref": null
+      },
+      {
+        "key": "el3",
+        "floor": "f3",
+        "type": "elevator",
+        "x": 960,
+        "y": 300,
+        "name": "Лифт",
+        "ref": null
+      },
+      {
+        "key": "ent_main",
+        "floor": "f1",
+        "type": "entrance",
+        "x": 500,
+        "y": 590,
+        "name": "Главный вход",
+        "ref": null,
+        "lat": 51.09085,
+        "lon": 71.4181
+      },
+      {
+        "key": "lobby",
+        "floor": "f1",
+        "type": "corridor",
+        "x": 500,
+        "y": 480,
+        "name": "Холл",
+        "ref": null
+      },
+      {
+        "key": "ent_side",
+        "floor": "f1",
+        "type": "entrance",
+        "x": 990,
+        "y": 480,
+        "name": "Боковой вход (пандус)",
+        "ref": null,
+        "lat": 51.09098,
+        "lon": 71.41862,
+        "is_accessible_entrance": true
+      },
+      {
+        "key": "side_hall",
+        "floor": "f1",
+        "type": "corridor",
+        "x": 900,
+        "y": 480,
+        "name": null,
+        "ref": null
+      },
+      {
+        "key": "r101",
+        "floor": "f1",
+        "type": "room",
+        "x": 100,
+        "y": 150,
+        "name": "Аудитория",
+        "ref": "101"
+      },
+      {
+        "key": "r105",
+        "floor": "f1",
+        "type": "room",
+        "x": 500,
+        "y": 150,
+        "name": "Библиотека",
+        "ref": "105"
+      },
+      {
+        "key": "wc1",
+        "floor": "f1",
+        "type": "toilet",
+        "x": 700,
+        "y": 420,
+        "name": "Доступный туалет",
+        "ref": "WC-1"
+      },
+      {
+        "key": "r201",
+        "floor": "f2",
+        "type": "room",
+        "x": 100,
+        "y": 150,
+        "name": "Аудитория",
+        "ref": "201"
+      },
+      {
+        "key": "r204",
+        "floor": "f2",
+        "type": "room",
+        "x": 500,
+        "y": 150,
+        "name": "Компьютерный класс",
+        "ref": "204"
+      },
+      {
+        "key": "r210",
+        "floor": "f2",
+        "type": "room",
+        "x": 900,
+        "y": 450,
+        "name": "Лаборатория",
+        "ref": "210"
+      },
+      {
+        "key": "r301",
+        "floor": "f3",
+        "type": "room",
+        "x": 500,
+        "y": 150,
+        "name": "Актовый зал",
+        "ref": "301"
+      },
+      {
+        "key": "c3_upper",
+        "floor": "f3",
+        "type": "corridor",
+        "x": 820,
+        "y": 200,
+        "name": "Полуэтаж",
+        "ref": null
+      },
+      {
+        "key": "r305",
+        "floor": "f3",
+        "type": "room",
+        "x": 820,
+        "y": 100,
+        "name": "Деканат",
+        "ref": "305"
+      }
+    ],
+    "edges": [
+      {
+        "from": "c1_w",
+        "to": "c1_st",
+        "type": "corridor",
+        "width_cm": 200
+      },
+      {
+        "from": "c1_st",
+        "to": "c1_mid",
+        "type": "corridor",
+        "width_cm": 200
+      },
+      {
+        "from": "c1_mid",
+        "to": "c1_wc",
+        "type": "corridor",
+        "width_cm": 200
+      },
+      {
+        "from": "c1_wc",
+        "to": "c1_e",
+        "type": "corridor",
+        "width_cm": 200
+      },
+      {
+        "from": "c1_st",
+        "to": "st1",
+        "type": "corridor",
+        "width_cm": 150
+      },
+      {
+        "from": "c1_e",
+        "to": "el1",
+        "type": "door",
+        "width_cm": 95
+      },
+      {
+        "from": "c2_w",
+        "to": "c2_st",
+        "type": "corridor",
+        "width_cm": 200
+      },
+      {
+        "from": "c2_st",
+        "to": "c2_mid",
+        "type": "corridor",
+        "width_cm": 200
+      },
+      {
+        "from": "c2_mid",
+        "to": "c2_wc",
+        "type": "corridor",
+        "width_cm": 200
+      },
+      {
+        "from": "c2_wc",
+        "to": "c2_e",
+        "type": "corridor",
+        "width_cm": 200
+      },
+      {
+        "from": "c2_st",
+        "to": "st2",
+        "type": "corridor",
+        "width_cm": 150
+      },
+      {
+        "from": "c2_e",
+        "to": "el2",
+        "type": "door",
+        "width_cm": 95
+      },
+      {
+        "from": "c3_w",
+        "to": "c3_st",
+        "type": "corridor",
+        "width_cm": 200
+      },
+      {
+        "from": "c3_st",
+        "to": "c3_mid",
+        "type": "corridor",
+        "width_cm": 200
+      },
+      {
+        "from": "c3_mid",
+        "to": "c3_wc",
+        "type": "corridor",
+        "width_cm": 200
+      },
+      {
+        "from": "c3_wc",
+        "to": "c3_e",
+        "type": "corridor",
+        "width_cm": 200
+      },
+      {
+        "from": "c3_st",
+        "to": "st3",
+        "type": "corridor",
+        "width_cm": 150
+      },
+      {
+        "from": "c3_e",
+        "to": "el3",
+        "type": "door",
+        "width_cm": 95
+      },
+      {
+        "from": "ent_main",
+        "to": "lobby",
+        "type": "door",
+        "width_cm": 140,
+        "steps": 3,
+        "description": "Крыльцо без пандуса"
+      },
+      {
+        "from": "lobby",
+        "to": "c1_mid",
+        "type": "corridor",
+        "width_cm": 300
+      },
+      {
+        "from": "ent_side",
+        "to": "side_hall",
+        "type": "ramp",
+        "width_cm": 120,
+        "slope_pct": 6,
+        "length_m": 6,
+        "description": "Пандус 1:16"
+      },
+      {
+        "from": "side_hall",
+        "to": "c1_e",
+        "type": "door",
+        "width_cm": 100,
+        "threshold_cm": 1
+      },
+      {
+        "from": "c1_w",
+        "to": "r101",
+        "type": "door",
+        "width_cm": 90
+      },
+      {
+        "from": "c1_mid",
+        "to": "r105",
+        "type": "door",
+        "width_cm": 120
+      },
+      {
+        "from": "c1_wc",
+        "to": "wc1",
+        "type": "door",
+        "width_cm": 100
+      },
+      {
+        "from": "c2_w",
+        "to": "r201",
+        "type": "door",
+        "width_cm": 90
+      },
+      {
+        "from": "c2_mid",
+        "to": "r204",
+        "type": "door",
+        "width_cm": 90
+      },
+      {
+        "from": "c2_e",
+        "to": "r210",
+        "type": "door",
+        "width_cm": 70,
+        "description": "Узкая дверь лаборатории"
+      },
+      {
+        "from": "c3_mid",
+        "to": "r301",
+        "type": "door",
+        "width_cm": 160
+      },
+      {
+        "from": "c3_e",
+        "to": "c3_upper",
+        "type": "stairs",
+        "width_cm": 150,
+        "steps": 2,
+        "length_m": 2,
+        "description": "Две ступени на полуэтаж"
+      },
+      {
+        "from": "c3_e",
+        "to": "c3_upper",
+        "type": "lift",
+        "width_cm": 100,
+        "length_m": 2,
+        "description": "Подъёмник для коляски"
+      },
+      {
+        "from": "c3_upper",
+        "to": "r305",
+        "type": "door",
+        "width_cm": 90
+      },
+      {
+        "from": "st1",
+        "to": "st2",
+        "type": "stairs",
+        "width_cm": 140,
+        "steps": 22
+      },
+      {
+        "from": "st2",
+        "to": "st3",
+        "type": "stairs",
+        "width_cm": 140,
+        "steps": 22
+      },
+      {
+        "from": "el1",
+        "to": "el2",
+        "type": "elevator",
+        "width_cm": 100
+      },
+      {
+        "from": "el2",
+        "to": "el3",
+        "type": "elevator",
+        "width_cm": 100
+      }
+    ]
+  }
+}
