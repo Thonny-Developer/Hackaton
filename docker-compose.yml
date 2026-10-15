@@ -1,9 +1,19 @@
-# Наружу открыт только Caddy (80/443). PostgreSQL, Redis и MinIO живут во внутренней
-# сети без доступа в интернет и без опубликованных портов, к ним ходит только API.
+# Весь проект Sapa одной командой: docker compose up -d --build
+#
+# Наружу открыт только web (Caddy, 80/443): он раздаёт собранный фронтенд и проксирует /api на бэкенд.
+# PostgreSQL, Redis и MinIO живут во внутренней сети без доступа в интернет и без опубликованных
+# портов, к ним ходит только API.
+
+name: sapa
 
 services:
-  caddy:
-    image: caddy:2.10-alpine
+  web:
+    build:
+      context: ./Frontend
+      args:
+        VITE_MAPBOX_ACCESS_TOKEN: ${VITE_MAPBOX_ACCESS_TOKEN:-}
+        # "/" = API на том же домене, что и сайт
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/}
     restart: unless-stopped
     ports:
       - "80:80"
@@ -21,7 +31,7 @@ services:
     networks: [web]
 
   api:
-    build: .
+    build: ./Backend
     restart: unless-stopped
     env_file: .env
     environment:
@@ -38,7 +48,7 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-    # web нужен для выхода в интернет (2GIS, OpenRouteService), backend для БД и хранилища
+    # Сеть web нужна для выхода в интернет (2GIS, OpenRouteService), backend для БД и хранилища
     networks: [web, backend]
     deploy:
       resources:

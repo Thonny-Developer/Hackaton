@@ -7,55 +7,26 @@ REST API навигатора доступной среды. Он строит �
 * Документация API: Swagger на `/api/docs`. Контракт для фронтенда описан в [docs/API.md](../docs/API.md).
 * Пример графа здания для импорта: [docs/demo_building.json](../docs/demo_building.json).
 
-## Быстрый старт (Docker)
+## Запуск
+
+Весь проект (фронтенд, API, PostgreSQL, Redis, MinIO, Caddy) поднимается одной командой из **корня репозитория**: `docker compose up -d --build`. Подробности, деплой на VPS и переменные описаны в [корневом README](../README.md).
+
+Команды бэкенда в Docker запускаются из корня репозитория:
 
 ```bash
-cd Backend
-cp .env.example .env
-# Замените секреты в .env. Для каждого подойдёт: openssl rand -hex 32
-docker compose up -d --build
 docker compose exec api python -m app.cli create-admin --email admin@example.com
+docker compose exec api python -m app.cli seed      # пересоздать демо-здание с нуля
+docker compose logs -f api
 ```
 
-После запуска:
-
-| Адрес | Что там |
-|---|---|
-| http://localhost/api/docs | Swagger |
-| http://localhost/api/health | Проверка API и БД |
-| http://localhost/api/v1/... | Сам API |
-
-При первом старте контейнер сам применит миграции и, если `SEED_DEMO=true`, создаст демо-здание. Если оно уже есть, повторный старт его не трогает, поэтому правки и препятствия не пропадают.
-
-Пересоздать демо-здание с нуля:
-
-```bash
-docker compose exec api python -m app.cli seed
-```
-
-## Деплой на VPS
-
-1. Направьте A-запись домена (например, `api.sapa.kz`) на IP сервера.
-2. Откройте на сервере порты 80 и 443. Остальные порты наружу не нужны.
-3. В `.env` укажите `DOMAIN=api.sapa.kz`, `CORS_ORIGINS=https://<адрес фронта>` и новые секреты.
-4. Выполните `docker compose up -d --build`. Caddy сам получит сертификат Let's Encrypt и включит HTTPS.
-
-Пока домена нет, оставьте `DOMAIN=:80`: API будет работать по HTTP на IP сервера.
-
-Фронтенд можно раздавать тем же Caddy с того же домена: в [deploy/Caddyfile](deploy/Caddyfile) есть закомментированный блок для этого. Тогда CORS не понадобится вообще.
-
-Обновление на сервере:
-
-```bash
-git pull && docker compose up -d --build
-```
-
-Миграции применятся автоматически при старте контейнера `api`.
+При старте контейнер `api` сам применяет миграции и, если `SEED_DEMO=true`, создаёт демо-здание. Если оно уже есть, повторный старт его не трогает, поэтому правки и препятствия не пропадают.
 
 ## Как это устроено
 
 ```
-Caddy :80/:443 ──► api (FastAPI, uvicorn, 2 воркера)
+Caddy :80/:443 ──► /api/* ──► api (FastAPI, uvicorn, 2 воркера)
+   │
+   └─ /  ──► собранный фронтенд (статика)
                      │
         внутренняя сеть без выхода наружу
                      │
@@ -123,7 +94,6 @@ app/
     storage.py       MinIO и проверка схем
     external.py      клиенты 2GIS и OpenRouteService
 alembic/             миграции
-deploy/Caddyfile     reverse proxy
 tests/               pytest
 ```
 
@@ -186,12 +156,12 @@ uv run alembic upgrade head
 
 ## Переменные окружения
 
-Полный список с комментариями лежит в [.env.example](.env.example).
+Все переменные задаются в одном `.env` в корне репозитория. Полный список с комментариями лежит в [.env.example](../.env.example).
 
 | Переменная | По умолчанию | Назначение |
 |---|---|---|
 | `DOMAIN` | `:80` | Домен для HTTPS или `:80` для HTTP |
-| `CORS_ORIGINS` | localhost:3000, localhost:5173 | Адреса фронта через запятую |
+| `CORS_ORIGINS` | localhost:3000, localhost:5173 | Адреса фронта на другом домене через запятую. В Docker фронт и API на одном домене, нужно только для `npm run dev` |
 | `JWT_SECRET` | | Секрет подписи токенов, минимум 32 символа |
 | `JWT_TTL_MINUTES` | `720` | Время жизни токена |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | | Доступ к PostgreSQL |

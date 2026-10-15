@@ -9,7 +9,7 @@
 	}
 }
 
-# DOMAIN=api.example.kz включает автоматический HTTPS (Let's Encrypt).
+# DOMAIN=sapa.example.kz включает автоматический HTTPS (Let's Encrypt).
 # DOMAIN=:80 работает по HTTP, удобно локально или пока нет домена.
 {$DOMAIN} {
 	encode zstd gzip
@@ -24,20 +24,28 @@
 		-Server
 	}
 
+	# API
 	handle /api/* {
-		# Caddy не доверяет X-Forwarded-For от клиента и выставляет реальный IP сам
-		# Пока API перезапускается, запрос ждёт до 5 секунд, а не получает сразу 503
+		# Caddy не доверяет X-Forwarded-For от клиента и выставляет реальный IP сам.
+		# Пока API перезапускается, запрос ждёт до 5 секунд, а не получает сразу 503.
 		reverse_proxy api:8000 {
 			lb_try_duration 5s
 			lb_try_interval 250ms
 		}
 	}
 
-	# Сюда можно подключить сборку фронтенда (тогда фронт и API на одном домене и CORS не нужен):
-	#   root * /srv/frontend
-	#   try_files {path} /index.html
-	#   file_server
+	# Фронтенд (SPA): собранная статика, неизвестные пути отдают index.html
 	handle {
-		respond "Sapa API. Документация: /api/docs" 200
+		root * /srv/frontend
+
+		# Файлы в /assets/ содержат хэш в имени, их можно кэшировать навсегда.
+		# index.html не кэшируем, чтобы после деплоя сразу подхватывалась новая версия.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@other not path /assets/*
+		header @other Cache-Control "no-cache"
+
+		try_files {path} /index.html
+		file_server
 	}
 }
