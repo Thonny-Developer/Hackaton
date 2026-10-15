@@ -726,13 +726,22 @@ body { background: var(--sw-warm); }
 .navigator-empty { display: grid; justify-items: center; gap: 8px; margin: 22px 0; border: 1px dashed var(--sw-border); border-radius: 20px; padding: 24px 16px; text-align: center; }
 .navigator-empty p { margin: 0; color: var(--sw-blue); font-size: 11px; }
 .navigator-map-ui { position: absolute; inset: 0; z-index: 11; pointer-events: none; }
+.app-shell.navigator-open > main { position: relative; }
+.app-shell.navigator-open .map-info-panel,
+.app-shell.navigator-open .map-top-controls,
+.app-shell.navigator-open .map-caption,
+.app-shell.navigator-open .map-notice,
+.app-shell.navigator-open .route-fab,
+.app-shell.navigator-open .map-place-card { display: none !important; }
 .navigator-live-card { position: absolute; top: 24px; left: 50%; display: grid; grid-template-columns: auto 1fr; column-gap: 8px; min-width: min(390px, calc(100% - 48px)); transform: translateX(-50%); border: 1px solid rgba(241,237,230,.92); border-radius: 18px; background: rgba(241,237,230,.9); padding: 11px 15px; color: var(--sw-slate); box-shadow: 0 14px 35px rgba(54,70,86,.18), inset 0 1px rgba(255,255,255,.7); backdrop-filter: blur(16px); font-size: 12px; font-weight: 800; }
 .navigator-live-card small { grid-column: 2; margin-top: 3px; color: var(--sw-blue); font-size: 11px; font-weight: 600; }
 .navigator-live-dot { width: 8px; height: 8px; align-self: center; border-radius: 50%; background: #4b9b75; box-shadow: 0 0 0 4px rgba(75,155,117,.14); }
 .navigator-user-arrow { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
 .navigator-user-arrow span { width: 68px; height: 68px; display: grid; place-items: center; border: 5px solid rgba(241,237,230,.92); border-radius: 50%; background: var(--sw-slate); color: var(--sw-warm); box-shadow: 0 8px 25px rgba(54,70,86,.26), 0 0 0 10px rgba(124,154,162,.2); transform: rotate(var(--nav-heading, 0deg)); transition: transform .35s ease; }
 .navigator-map-bottom { position: absolute; right: 24px; bottom: 24px; left: 24px; display: flex; align-items: center; justify-content: space-between; border-radius: 18px; background: rgba(241,237,230,.86); padding: 9px 11px 9px 14px; color: var(--sw-slate); box-shadow: 0 12px 28px rgba(54,70,86,.16); backdrop-filter: blur(14px); font-size: 11px; font-weight: 800; }
+.navigator-map-bottom > div { display: flex; gap: 8px; }
 .navigator-map-bottom button { pointer-events: auto; border: 0; border-radius: 999px; background: var(--sw-slate); padding: 8px 13px; color: var(--sw-warm); font-size: 10px; font-weight: 800; cursor: pointer; }
+.navigator-map-bottom button:disabled { opacity: .5; cursor: default; }
 @media (max-width: 900px) {
   .navigator-panel { padding-bottom: 26px; }
   .navigator-next-step strong { font-size: 17px; }

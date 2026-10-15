@@ -189,7 +189,7 @@ function SeeWayLogo({ compact = false }: { compact?: boolean }) {
     <circle className="logo-dot" cx="38" cy="48" r="2.6" />
     <path className="logo-pin" d="M48 3c-7.4 0-13 5.5-13 13 0 8.5 13 25 13 25s13-16.5 13-25C61 8.5 55.4 3 48 3Z" />
     <circle className="logo-pin-center" cx="48" cy="16" r="5.5" />
-  </svg>{!compact && <div><strong>SeeWay</strong><span>ACCESSIBILITY NAVIGATOR</span></div>}</div>;
+  </svg>{!compact && <div><strong>SeeWay</strong><span>НАВИГАТОР ДОСТУПНОСТИ</span></div>}</div>;
 }
 
 function WelcomeArchitecture() {
@@ -272,7 +272,14 @@ export default function App() {
       .catch((e) => { if (e?.status === 401) setToken(null); });
   }, []);
 
-  const [welcomeOpen, setWelcomeOpen] = useState(true);
+  const [welcomeOpen, setWelcomeOpen] = useState(() => {
+    try { return localStorage.getItem("seeway-welcome-seen") !== "1"; }
+    catch { return true; }
+  });
+  const closeWelcome = () => {
+    setWelcomeOpen(false);
+    try { localStorage.setItem("seeway-welcome-seen", "1"); } catch { /* Хранилище может быть недоступно */ }
+  };
   const [query, setQuery] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
@@ -453,8 +460,10 @@ export default function App() {
       const result = await fetchOutdoorRoute(from, to, prefs.includes("noSteps") ? "no_stairs" : "default");
       setRouteResult(result);
       setNavigatorStep(0);
-      setNavigatorOpen(false);
       setMapRoute({ geometry: result.route.geometry, from, to });
+      setRoutePanel(false);
+      setSheetOpen(false);
+      setNavigatorOpen(true);
     } catch (e) {
       setRouteError(e instanceof Error ? e.message : "Не удалось построить маршрут");
     } finally {
@@ -489,8 +498,8 @@ export default function App() {
   };
 
   return (
-    <div className={`app-shell ${selected && !routePanel ? "has-selection" : ""}`}>
-      <aside className="sidebar">
+    <div className={`app-shell ${selected && !routePanel ? "has-selection" : ""} ${navigatorOpen ? "navigator-open" : ""}`}>
+      {!navigatorOpen && <aside className="sidebar">
         <div className="brand"><SeeWayLogo compact /></div>
         <nav aria-label="Основная навигация">
           <button className={!routePanel && !navigatorOpen ? "nav-item active" : "nav-item"} onClick={() => { setFavoritesOnly(false); closeDetail(); }}><Icon name="pin" /><span>Карта</span></button>
@@ -499,7 +508,7 @@ export default function App() {
           <button className="nav-item sos-nav-item" onClick={() => { setSosOpen(true); setSosSent(false); }}><span className="sos-nav-icon">SOS</span><span>SOS</span></button>
           <button className="nav-item" onClick={() => user ? setAuthView("profile") : setProfileMenu(!profileMenu)}><Icon name="user" /><span>Профиль</span></button>
         </nav>
-      </aside>
+      </aside>}
 
       <main>
         <section className={`results-panel map-info-panel ${sheetOpen ? "sheet-open" : ""}`} aria-label={routePanel ? "Планирование маршрута" : "Поиск и фильтры"}>
@@ -604,7 +613,7 @@ export default function App() {
           {navigatorOpen && routeResult && <div className="navigator-map-ui" aria-label="Режим движения по маршруту">
             <div className="navigator-live-card"><span className="navigator-live-dot" />{navigationPosition ? "Вы в пути" : "Определяем местоположение…"}<small>{routeResult.route.steps[navigatorStep]?.text || "Маршрут построен"}</small></div>
             <div className="navigator-user-arrow" aria-hidden="true" style={{ "--nav-heading": `${navigationHeading}deg` } as React.CSSProperties}><span><Icon name="navigation" size={31} /></span></div>
-            <div className="navigator-map-bottom"><span>{navigatorStep + 1} из {routeResult.route.steps.length || 1}</span><button onClick={() => setNavigatorOpen(false)}>Выйти</button></div>
+            <div className="navigator-map-bottom"><span>{navigatorStep + 1} из {routeResult.route.steps.length || 1}</span><div><button disabled={navigatorStep >= routeResult.route.steps.length - 1} onClick={() => setNavigatorStep((step) => Math.min(routeResult.route.steps.length - 1, step + 1))}>Далее</button><button onClick={() => setNavigatorOpen(false)}>Выйти</button></div></div>
           </div>}
 
           {selected && !routePanel && (
@@ -746,22 +755,22 @@ export default function App() {
         <section className="welcome-screen" aria-label="Добро пожаловать в SeeWay">
           <div className="welcome-orb orb-one" /><div className="welcome-orb orb-two" />
           <article className="welcome-card">
-            <header className="welcome-header"><SeeWayLogo /><button className="glass-icon-button" onClick={() => setWelcomeOpen(false)} aria-label="Закрыть приветствие"><Icon name="close" size={19} /></button></header>
+          <header className="welcome-header"><SeeWayLogo /><button className="glass-icon-button" onClick={closeWelcome} aria-label="Закрыть приветствие"><Icon name="close" size={19} /></button></header>
             <div className="welcome-layout">
               <div className="welcome-copy">
-                <p className="welcome-kicker">A CLEARER WAY FOR EVERYONE</p>
-                <h1>Every place should be within reach.</h1>
-                <p className="welcome-description">SeeWay helps you discover accessible buildings, check available facilities, and find routes that match your mobility needs.</p>
+                <p className="welcome-kicker">ПОНЯТНЫЙ ПУТЬ ДЛЯ КАЖДОГО</p>
+                <h1>Каждое место должно быть доступно.</h1>
+                <p className="welcome-description">SeeWay помогает находить доступные здания, узнавать об удобствах и строить маршруты с учётом ваших потребностей.</p>
                 <div className="welcome-features">
-                  <div><span><Icon name="pin" /></span><p><strong>Discover places</strong><small>Find buildings and public spaces around you.</small></p></div>
-                  <div><span><Icon name="check" /></span><p><strong>Check accessibility</strong><small>See ramps, elevators, entrances, and facilities.</small></p></div>
-                  <div><span><Icon name="route" /></span><p><strong>Choose your route</strong><small>Plan journeys with accessibility in mind.</small></p></div>
+                  <div><span><Icon name="pin" /></span><p><strong>Находите места</strong><small>Ищите здания и общественные пространства рядом.</small></p></div>
+                  <div><span><Icon name="check" /></span><p><strong>Проверяйте доступность</strong><small>Узнавайте о пандусах, лифтах, входах и удобствах.</small></p></div>
+                  <div><span><Icon name="route" /></span><p><strong>Выбирайте маршрут</strong><small>Планируйте путь с учётом своих потребностей.</small></p></div>
                 </div>
-                <button className="welcome-primary" onClick={() => setWelcomeOpen(false)}>Go to map <Icon name="chevron" /></button>
+                <button className="welcome-primary" onClick={closeWelcome}>Перейти к карте <Icon name="chevron" /></button>
               </div>
-              <div className="welcome-visual"><div className="visual-glass-label"><span className="status-dot" />Open paths, welcoming places</div><WelcomeArchitecture /></div>
+              <div className="welcome-visual"><div className="visual-glass-label"><span className="status-dot" />Доступные маршруты и места</div><WelcomeArchitecture /></div>
             </div>
-            <footer className="welcome-footer"><span>Different needs. One more accessible world.</span><button onClick={() => setWelcomeOpen(false)}>Continue without introduction</button></footer>
+            <footer className="welcome-footer"><span>Разные потребности — мир, доступный каждому.</span><button onClick={closeWelcome}>Продолжить без вступления</button></footer>
           </article>
         </section>
       )}
