@@ -285,6 +285,8 @@ export default function App() {
   const [routeResult, setRouteResult] = useState<{ route: OutdoorRoute; notices: string[] } | null>(null);
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const [navigatorStep, setNavigatorStep] = useState(0);
+  const [navigationPosition, setNavigationPosition] = useState<LatLon | null>(null);
+  const [navigationHeading, setNavigationHeading] = useState(0);
   const [mapRoute, setMapRoute] = useState<MapRoute | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
@@ -313,6 +315,21 @@ export default function App() {
   const [sheetOpen, setSheetOpen] = useState(false);
 
   useEffect(() => { if (routePanel) setSheetOpen(true); }, [routePanel]);
+  useEffect(() => {
+    if (!navigatorOpen || !routeResult) { setNavigationPosition(null); return; }
+    setNavigationPosition(mapRoute?.from ?? null);
+    setNavigationHeading(0);
+    if (!navigator.geolocation) return;
+    const watch = navigator.geolocation.watchPosition(
+      ({ coords }) => {
+        setNavigationPosition({ lat: coords.latitude, lon: coords.longitude });
+        if (typeof coords.heading === "number" && Number.isFinite(coords.heading) && coords.heading >= 0) setNavigationHeading(coords.heading);
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 },
+    );
+    return () => navigator.geolocation.clearWatch(watch);
+  }, [navigatorOpen, routeResult, mapRoute]);
   const mapRef = useRef<any>(null);
   useEffect(() => {
     if (initialLocationRequested.current) return;
@@ -572,7 +589,7 @@ export default function App() {
         </section>
 
         <section className="map-area" aria-label="Интерактивная карта">
-          <MapboxMap selected={selected} styleName={mapLayer} locationActive={locationActive} route={mapRoute} onMapClick={pickMapPoint} onMapReady={(map) => { mapRef.current = map; (window as any).__seewayMap = map; const location = initialLocationRef.current; if (location) map.flyTo({ center: [location.lon, location.lat], zoom: 16 }); }} />
+          <MapboxMap selected={selected} styleName={mapLayer} locationActive={locationActive} route={mapRoute} navigationPosition={navigatorOpen ? navigationPosition : null} onMapClick={pickMapPoint} onMapReady={(map) => { mapRef.current = map; (window as any).__seewayMap = map; const location = initialLocationRef.current; if (location) map.flyTo({ center: [location.lon, location.lat], zoom: 16 }); }} />
           {!import.meta.env.VITE_MAPBOX_ACCESS_TOKEN && <div className="map-notice">Добавьте VITE_MAPBOX_ACCESS_TOKEN в Frontend/.env</div>}
           <div className="map-caption">SeeWay <span>{apiState === "ready" ? "Данные API" : apiState === "loading" ? "Загрузка зданий…" : "Демо-данные · API недоступен"}</span></div>
           <div className="map-top-controls">
@@ -581,6 +598,12 @@ export default function App() {
             <button onClick={() => user ? setAuthView("preferences") : setAuthView("login")} aria-label="Настройки"><Icon name="settings" size={18} /></button>
           </div>
           {!selected && <button className="route-fab" onClick={openRoutePanel}><Icon name="route" />Построить маршрут</button>}
+
+          {navigatorOpen && routeResult && <div className="navigator-map-ui" aria-label="Режим движения по маршруту">
+            <div className="navigator-live-card"><span className="navigator-live-dot" />{navigationPosition ? "Вы в пути" : "Определяем местоположение…"}<small>{routeResult.route.steps[navigatorStep]?.text || "Маршрут построен"}</small></div>
+            <div className="navigator-user-arrow" aria-hidden="true" style={{ "--nav-heading": `${navigationHeading}deg` } as React.CSSProperties}><span><Icon name="navigation" size={31} /></span></div>
+            <div className="navigator-map-bottom"><span>{navigatorStep + 1} из {routeResult.route.steps.length || 1}</span><button onClick={() => setNavigatorOpen(false)}>Выйти</button></div>
+          </div>}
 
           {selected && !routePanel && (
             <aside className={`detail-panel map-place-card ${detailExpanded ? "expanded" : ""}`} aria-label={`Профиль: ${selected.name}`}>

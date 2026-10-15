@@ -7,6 +7,7 @@ type Props = {
   locationActive: boolean;
   selected?: { lat?: number | null; lon?: number | null } | null;
   route?: MapRoute | null;
+  navigationPosition?: LatLon | null;
   onMapReady?: (map: any) => void;
   onMapClick?: (point: LatLon) => void;
 };
@@ -42,7 +43,7 @@ function drawRoute(map: any, route: MapRoute | null | undefined) {
   map.addLayer({ id: "sw-route-line", type: "line", source: ROUTE_SOURCE, layout, paint: { "line-color": "#2b6cb0", "line-width": 5 } });
 }
 
-export default function MapboxMap({ styleName, locationActive, selected, route, onMapReady, onMapClick }: Props) {
+export default function MapboxMap({ styleName, locationActive, selected, route, navigationPosition, onMapReady, onMapClick }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const routeRef = useRef(route);
@@ -93,6 +94,12 @@ export default function MapboxMap({ styleName, locationActive, selected, route, 
     if (!locationActive || !navigator.geolocation || !mapRef.current) return;
     navigator.geolocation.getCurrentPosition(({ coords }) => mapRef.current?.flyTo({ center: [coords.longitude, coords.latitude], zoom: 16 }));
   }, [locationActive]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !navigationPosition) return;
+    map.easeTo({ center: [navigationPosition.lon, navigationPosition.lat], duration: 700, zoom: Math.max(map.getZoom(), 16) });
+  }, [navigationPosition]);
 
   return <div className="mapbox-canvas" ref={host} aria-label="Карта Mapbox" />;
 }
