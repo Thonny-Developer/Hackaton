@@ -465,10 +465,9 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand"><SeeWayLogo compact /></div>
         <nav aria-label="Основная навигация">
-          <button className={!favoritesOnly && !routePanel ? "nav-item active" : "nav-item"} onClick={() => { setFavoritesOnly(false); closeDetail(); }}><Icon name="pin" /><span>Карта</span></button>
+          <button className={!routePanel ? "nav-item active" : "nav-item"} onClick={() => { setFavoritesOnly(false); closeDetail(); }}><Icon name="pin" /><span>Карта</span></button>
           <button className={routePanel ? "nav-item active" : "nav-item"} onClick={() => { setFavoritesOnly(false); openRoutePanel(); }}><Icon name="route" /><span>Маршрут</span></button>
           <button className="nav-item sos-nav-item" onClick={() => { setSosOpen(true); setSosSent(false); }}><span className="sos-nav-icon">SOS</span><span>SOS</span></button>
-          <button className={favoritesOnly ? "nav-item active" : "nav-item"} onClick={() => { setFavoritesOnly(true); setRoutePanel(false); setSelected(null); }}><Icon name="heart" /><span>Избранное</span><b>{favorites.length}</b></button>
           <button className="nav-item" onClick={() => user ? setAuthView("profile") : setProfileMenu(!profileMenu)}><Icon name="user" /><span>Профиль</span></button>
         </nav>
       </aside>
