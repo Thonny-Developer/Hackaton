@@ -108,6 +108,29 @@ tests/               pytest
 
 Порядок выбора для уличного участка такой. Для профилей с ограничениями сначала пробуется ORS, потом 2GIS. Если не ответил ни один, расстояние оценивается по прямой. В ответе всегда указано, проверялась ли доступность улицы (`accessibility_checked`). Ответы внешних API кэшируются в памяти на 10 минут.
 
+## Почта
+
+Письма отправляются через SMTP, по умолчанию через Gmail ([app/services/mailer.py](app/services/mailer.py)):
+
+* ссылка для сброса пароля (`POST /api/v1/auth/forgot-password`);
+* уведомление админам, когда отмечено новое препятствие.
+
+Письма уходят в фоне, поэтому недоступный почтовый сервер не тормозит API: ошибка только пишется в лог. Без `SMTP_HOST` почта выключена, а в режиме разработки текст письма со ссылкой выводится в лог.
+
+Как подключить Gmail:
+
+1. Включите двухэтапную аутентификацию в Google-аккаунте, с которого будут уходить письма.
+2. Создайте пароль приложения: https://myaccount.google.com/apppasswords. Google покажет 16 символов.
+3. В `.env` укажите `SMTP_HOST=smtp.gmail.com`, `SMTP_USER=<адрес Gmail>`, `SMTP_PASSWORD=<пароль приложения без пробелов>` и `PUBLIC_URL=<адрес сайта>`.
+4. Перезапустите API и проверьте почту:
+
+```bash
+docker compose up -d api
+docker compose exec api python -m app.cli test-email --to you@gmail.com
+```
+
+Обычный пароль от аккаунта Gmail не подойдёт, будет ошибка `535 Username and Password not accepted`. Бесплатный Gmail отправляет до 500 писем в сутки, для уведомлений этого хватает.
+
 ## Разработка без Docker
 
 Нужны [uv](https://docs.astral.sh/uv/) и PostgreSQL (можно поднять только БД: `docker compose up -d db`, но тогда пробросьте её порт в отдельном `docker-compose.override.yml`).
@@ -151,6 +174,7 @@ uv run alembic upgrade head
 | `python -m app.cli seed` | Создать или пересоздать демо-здание |
 | `python -m app.cli seed --if-missing` | Создать демо-здание, только если его ещё нет |
 | `python -m app.cli export-demo --out file.json` | Сохранить демо-здание в формате импорта |
+| `python -m app.cli test-email --to E` | Отправить тестовое письмо и проверить настройки SMTP |
 
 В Docker команды запускаются через `docker compose exec api ...`.
 
@@ -174,6 +198,11 @@ uv run alembic upgrade head
 | `DGIS_API_KEY`, `ORS_API_KEY` | пусто | Внешние API, необязательно |
 | `WORKERS` | `2` | Число воркеров uvicorn |
 | `SEED_DEMO` | `true` | Создавать демо-здание при старте, если его нет |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` | пусто / `587` / `starttls` | Почтовый сервер. Пустой `SMTP_HOST` выключает почту |
+| `SMTP_USER` / `SMTP_PASSWORD` | пусто | Логин и пароль SMTP. Для Gmail это адрес и пароль приложения |
+| `SMTP_FROM` | пусто | Отправитель, по умолчанию `SMTP_USER` |
+| `PUBLIC_URL` | `http://localhost` | Адрес сайта для ссылок в письмах |
+| `NOTIFY_OBSTACLES` | `true` | Письмо админам о новом препятствии |
 
 ## Ограничения
 

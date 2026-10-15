@@ -9,6 +9,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -22,6 +23,14 @@ from app.db import Base
 class Role(str, enum.Enum):
     admin = "admin"
     editor = "editor"
+    # Обычный посетитель: регистрируется сам, граф менять не может
+    user = "user"
+
+
+class ReportStatus(str, enum.Enum):
+    new = "new"
+    confirmed = "confirmed"
+    rejected = "rejected"
 
 
 class NodeType(str, enum.Enum):
@@ -74,6 +83,31 @@ class User(TimestampMixin, Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[Role] = mapped_column(_enum(Role), default=Role.editor)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    name: Mapped[str | None] = mapped_column(String(100))
+    # Что важно пользователю на маршруте: noSteps, elevator, wide, ramp, toilet
+    accessibility_prefs: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+
+
+class Favorite(Base):
+    __tablename__ = "favorites"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    building_id: Mapped[int] = mapped_column(ForeignKey("buildings.id", ondelete="CASCADE"), primary_key=True,
+                                             index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Report(TimestampMixin, Base):
+    """Сообщение посетителя об изменении доступности. На маршруты не влияет,
+    пока редактор не проверит его и не заведёт препятствие."""
+
+    __tablename__ = "reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    building_id: Mapped[int] = mapped_column(ForeignKey("buildings.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    text: Mapped[str] = mapped_column(String(2000))
+    status: Mapped[ReportStatus] = mapped_column(_enum(ReportStatus), default=ReportStatus.new, index=True)
 
 
 class Building(TimestampMixin, Base):

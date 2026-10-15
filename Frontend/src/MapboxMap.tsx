@@ -1,10 +1,20 @@
 import { useEffect, useRef } from "react";
+import type { LatLon } from "./geo";
 
-type Props = { styleName: string; locationActive: boolean; onMapReady?: (map: any) => void };
+export type MapRoute = { geometry: [number, number][]; from: LatLon; to: LatLon };
+type Props = {
+  styleName: string;
+  locationActive: boolean;
+  selected?: { lat?: number | null; lon?: number | null } | null;
+  route?: MapRoute | null;
+  onMapReady?: (map: any) => void;
+  onMapClick?: (point: LatLon) => void;
+};
 
 declare global { interface Window { mapboxgl?: any } }
 const TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined;
 const MAP_SCRIPT = "https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.js";
+const ROUTE_SOURCE = "sw-route";
 
 function loadMapbox() {
   if (window.mapboxgl) return Promise.resolve(window.mapboxgl);
@@ -16,9 +26,29 @@ function loadMapbox() {
   });
 }
 
-export default function MapboxMap({ styleName, locationActive, onMapReady }: Props) {
+function styleUrl(styleName: string) {
+  if (styleName === "Спутник") return "mapbox://styles/mapbox/satellite-streets-v12";
+  if (styleName === "Контрастная") return "mapbox://styles/mapbox/dark-v11";
+  return "mapbox://styles/mapbox/streets-v12";
+}
+
+function drawRoute(map: any, route: MapRoute | null | undefined) {
+  const data = { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: route?.geometry ?? [] } };
+  const source = map.getSource(ROUTE_SOURCE);
+  if (source) { source.setData(data); return; }
+  map.addSource(ROUTE_SOURCE, { type: "geojson", data });
+  const layout = { "line-join": "round", "line-cap": "round" };
+  map.addLayer({ id: "sw-route-casing", type: "line", source: ROUTE_SOURCE, layout, paint: { "line-color": "#ffffff", "line-width": 9, "line-opacity": 0.9 } });
+  map.addLayer({ id: "sw-route-line", type: "line", source: ROUTE_SOURCE, layout, paint: { "line-color": "#2b6cb0", "line-width": 5 } });
+}
+
+export default function MapboxMap({ styleName, locationActive, selected, route, onMapReady, onMapClick }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
+  const routeRef = useRef(route);
+  const onMapClickRef = useRef(onMapClick);
+  routeRef.current = route;
+  onMapClickRef.current = onMapClick;
 
   useEffect(() => {
     if (!host.current || !TOKEN) return;
@@ -26,22 +56,38 @@ export default function MapboxMap({ styleName, locationActive, onMapReady }: Pro
     loadMapbox().then((mapbox) => {
       if (cancelled || !host.current) return;
       mapbox.accessToken = TOKEN;
-      const map = new mapbox.Map({ container: host.current, style: styleName === "Спутник" ? "mapbox://styles/mapbox/satellite-streets-v12" : styleName === "Контрастная" ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/streets-v12", center: [71.4181, 51.09085], zoom: 14.4, attributionControl: true });
+      const map = new mapbox.Map({ container: host.current, style: styleUrl(styleName), center: [71.4181, 51.09085], zoom: 14.4, attributionControl: true });
       map.addControl(new mapbox.NavigationControl({ showCompass: false }), "bottom-right");
+      map.on("style.load", () => drawRoute(map, routeRef.current));
+      map.on("click", (e: any) => onMapClickRef.current?.({ lat: e.lngLat.lat, lon: e.lngLat.lng }));
       mapRef.current = map;
       onMapReady?.(map);
     }).catch((error) => console.error(error));
     return () => { cancelled = true; mapRef.current?.remove(); mapRef.current = null; };
-    // Style is updated separately so map state and gestures persist.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [TOKEN]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !window.mapboxgl) return;
-    const style = styleName === "Спутник" ? "mapbox://styles/mapbox/satellite-streets-v12" : styleName === "Контрастная" ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/streets-v12";
-    map.setStyle(style);
+    map.setStyle(styleUrl(styleName));
   }, [styleName]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.mapboxgl) return;
+    if (map.isStyleLoaded()) drawRoute(map, route);
+    if (!route?.geometry.length) return;
+    const bounds = new window.mapboxgl.LngLatBounds();
+    route.geometry.forEach((point) => bounds.extend(point));
+    map.fitBounds(bounds, { padding: 80, maxZoom: 17 });
+  }, [route]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || selected?.lat == null || selected?.lon == null || route) return;
+    if (!map.getBounds().contains([selected.lon, selected.lat])) map.flyTo({ center: [selected.lon, selected.lat], zoom: Math.max(map.getZoom(), 15) });
+  }, [selected, route]);
 
   useEffect(() => {
     if (!locationActive || !navigator.geolocation || !mapRef.current) return;

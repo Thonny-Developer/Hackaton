@@ -3,7 +3,7 @@ from typing import Annotated, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, model_validator
 
-from app.models import EdgeType, NodeType, ObstacleType, Role
+from app.models import EdgeType, NodeType, ObstacleType, ReportStatus, Role
 from app.services.profiles import Profile, ProfileOverrides
 
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
@@ -34,24 +34,65 @@ class TokenOut(BaseModel):
     expires_in: int
 
 
+AccessPref = Literal["noSteps", "elevator", "wide", "ramp", "toilet"]
+PersonName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+Password = Annotated[str, Field(min_length=10, max_length=128)]
+
+
 class UserOut(ORM):
     id: int
     email: str
+    name: str | None
     role: Role
     is_active: bool
+    accessibility_prefs: list[str]
     created_at: datetime
+
+
+class RegisterRequest(BaseModel):
+    name: PersonName
+    email: EmailStr
+    password: Password
+
+
+class MeUpdate(BaseModel):
+    name: PersonName | None = None
+    email: EmailStr | None = None
+    accessibility_prefs: list[AccessPref] | None = Field(None, max_length=10)
 
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=10, max_length=128)
+    password: Password
+    name: PersonName | None = None
     role: Role = Role.editor
 
 
 class UserUpdate(BaseModel):
-    password: str | None = Field(None, min_length=10, max_length=128)
+    password: Password | None = None
     role: Role | None = None
     is_active: bool | None = None
+
+
+# ---------- Reports ----------
+
+class ReportCreate(BaseModel):
+    building_id: int
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=2000)]
+
+
+class ReportUpdate(BaseModel):
+    status: ReportStatus
+
+
+class ReportOut(ORM):
+    id: int
+    building_id: int
+    building_name: str | None = None
+    user_id: int | None
+    text: str
+    status: ReportStatus
+    created_at: datetime
 
 
 # ---------- Buildings / Floors ----------

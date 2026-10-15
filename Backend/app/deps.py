@@ -20,7 +20,10 @@ async def get_or_404(session: AsyncSession, model: type[M], obj_id: int, what: s
     return obj
 
 
-async def paginate(session: AsyncSession, stmt: Select, limit: int, offset: int) -> tuple[list, int]:
+async def paginate(session: AsyncSession, stmt: Select, limit: int, offset: int,
+                   scalars: bool = True) -> tuple[list, int]:
+    """scalars=False возвращает строки целиком, когда в select несколько колонок."""
     total = await session.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
-    items = list(await session.scalars(stmt.limit(limit).offset(offset)))
+    page = stmt.limit(limit).offset(offset)
+    items = list(await session.scalars(page)) if scalars else list(await session.execute(page))
     return items, total or 0

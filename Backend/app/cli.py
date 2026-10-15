@@ -3,6 +3,7 @@
     python -m app.cli create-admin --email admin@example.com [--password ...] [--role admin|editor]
     python -m app.cli seed [--if-missing]  # создать или пересоздать демо-здание
     python -m app.cli export-demo     # сохранить демо-здание как пример JSON для импорта
+    python -m app.cli test-email --to you@example.com   # проверить настройки SMTP
 """
 
 import argparse
@@ -13,11 +14,13 @@ import sys
 
 from sqlalchemy import func, select
 
+from app.config import get_settings
 from app.db import SessionLocal, engine
 from app.models import Building, Role, User
 from app.schemas import BuildingImport
 from app.security import hash_password
 from app.seed_data import DEMO_NAME, build_demo
+from app.services import mailer
 from app.services.importer import import_graph
 
 
@@ -55,6 +58,21 @@ async def seed(if_missing: bool) -> None:
             print(f"  {key:10} -> node_id {result.node_ids[key]}")
 
 
+def test_email(to: str) -> None:
+    s = get_settings()
+    if not mailer.is_configured():
+        sys.exit("SMTP не настроен: задайте SMTP_HOST, SMTP_USER и SMTP_PASSWORD в .env")
+    print(f"Отправляю через {s.smtp_host}:{s.smtp_port} ({s.smtp_security}) от {s.smtp_from or s.smtp_user} ...")
+    try:
+        mailer.send(mailer.test_mail(to))
+    except Exception as exc:  # noqa: BLE001
+        hint = ""
+        if "535" in str(exc) or "Username and Password not accepted" in str(exc):
+            hint = "\nДля Gmail нужен пароль приложения, а не обычный пароль: https://myaccount.google.com/apppasswords"
+        sys.exit(f"Ошибка: {exc.__class__.__name__}: {exc}{hint}")
+    print(f"Готово, проверьте ящик {to} (и папку «Спам»)")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="app.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -66,7 +84,13 @@ def main() -> None:
     sd.add_argument("--if-missing", action="store_true", help="Не трогать демо-здание, если оно уже есть")
     ex = sub.add_parser("export-demo")
     ex.add_argument("--out", default="-")
+    te = sub.add_parser("test-email")
+    te.add_argument("--to", required=True)
     args = p.parse_args()
+
+    if args.cmd == "test-email":
+        test_email(args.to)
+        return
 
     if args.cmd == "export-demo":
         text = json.dumps(build_demo(), ensure_ascii=False, indent=2)

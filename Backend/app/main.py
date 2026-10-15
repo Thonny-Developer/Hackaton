@@ -13,7 +13,19 @@ from sqlalchemy.exc import IntegrityError
 from app.config import get_settings
 from app.db import engine
 from app.ratelimit import limiter
-from app.routers import auth, buildings, edges, floors, integrations, nodes, obstacles, route, users
+from app.routers import (
+    account,
+    auth,
+    buildings,
+    edges,
+    floors,
+    integrations,
+    nodes,
+    obstacles,
+    reports,
+    route,
+    users,
+)
 from app.services import storage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -83,7 +95,7 @@ async def integrity_error(request: Request, exc: IntegrityError):
 
 
 api = APIRouter(prefix="/api/v1")
-for r in (auth, users, buildings, floors, nodes, edges, obstacles, route, integrations):
+for r in (auth, account, users, buildings, floors, nodes, edges, obstacles, reports, route, integrations):
     api.include_router(r.router)
 app.include_router(api)
 

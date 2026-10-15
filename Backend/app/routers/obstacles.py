@@ -1,13 +1,15 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.deps import Limit, Offset, SessionDep, get_or_404, paginate
-from app.models import Edge, Node, Obstacle
+from app.models import Building, Edge, Floor, Node, Obstacle, Role, User
 from app.schemas import ObstacleCreate, ObstacleOut, ObstacleUpdate, Page
 from app.security import EditorUser
+from app.services import mailer
 from app.services.graph_cache import bump_graph_version
 
 router = APIRouter(prefix="/obstacles", tags=["obstacles"])
@@ -38,7 +40,7 @@ async def list_obstacles(session: SessionDep, building_id: int | None = None,
 
 @router.post("", response_model=ObstacleOut, status_code=status.HTTP_201_CREATED,
              summary="Отметить препятствие (сразу влияет на маршруты)")
-async def create_obstacle(data: ObstacleCreate, session: SessionDep, user: EditorUser):
+async def create_obstacle(data: ObstacleCreate, session: SessionDep, user: EditorUser, background: BackgroundTasks):
     if data.node_id is not None:
         target = await get_or_404(session, Node, data.node_id, "Узел")
     else:
@@ -49,7 +51,43 @@ async def create_obstacle(data: ObstacleCreate, session: SessionDep, user: Edito
     await bump_graph_version(session, target.building_id)
     await session.commit()
     await session.refresh(o)
+    if get_settings().notify_obstacles:
+        mail = await _obstacle_mail(session, o, target, user)
+        if mail:
+            background.add_task(mailer.send_safe, mail)
     return o
+
+
+# Казахстан с 2024 года живёт в одном часовом поясе UTC+5
+KZ_TZ = timezone(timedelta(hours=5))
+
+OBSTACLE_TITLES = {"elevator_broken": "Лифт не работает", "repair": "Ремонт", "blocked": "Проход перекрыт",
+                   "narrowed": "Проход сужен", "other": "Препятствие"}
+
+
+async def _obstacle_mail(session, o: Obstacle, target, author: User) -> mailer.Mail | None:
+    """Письмо всем активным админам, кроме автора: на маршрутах это отразится сразу."""
+    to = list(await session.scalars(
+        select(User.email).where(User.role == Role.admin, User.is_active.is_(True), User.id != author.id)
+    ))
+    if not to:
+        return None
+    building = await session.get(Building, o.building_id)
+    nodes = [target] if isinstance(target, Node) else [await session.get(Node, target.from_node_id),
+                                                       await session.get(Node, target.to_node_id)]
+    floors = {n.floor_id: await session.get(Floor, n.floor_id) for n in nodes}
+    where = " → ".join(
+        f"{n.name or n.ref or n.type.value} ({floors[n.floor_id].level} этаж)" for n in nodes
+    )
+    lines = [("Здание", building.name), ("Где", where)]
+    if o.description:
+        lines.append(("Описание", o.description))
+    if o.reduced_width_cm:
+        lines.append(("Ширина прохода", f"{o.reduced_width_cm:g} см"))
+    if o.ends_at:
+        lines.append(("До", _aware(o.ends_at).astimezone(KZ_TZ).strftime("%d.%m.%Y %H:%M (UTC+5)")))
+    lines.append(("Отметил", author.email))
+    return mailer.obstacle_mail(to, OBSTACLE_TITLES.get(o.type.value, "Препятствие"), lines)
 
 
 @router.get("/{obstacle_id}", response_model=ObstacleOut)
