@@ -303,11 +303,27 @@ export default function App() {
   const [layersOpen, setLayersOpen] = useState(false);
   const [mapLayer, setMapLayer] = useState("Схема");
   const [locationActive, setLocationActive] = useState(false);
+  const initialLocationRef = useRef<LatLon | null>(null);
+  const initialLocationRequested = useRef(false);
   const [detailExpanded, setDetailExpanded] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
 
   useEffect(() => { if (routePanel) setSheetOpen(true); }, [routePanel]);
   const mapRef = useRef<any>(null);
+  useEffect(() => {
+    if (initialLocationRequested.current) return;
+    initialLocationRequested.current = true;
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        const location = { lat: coords.latitude, lon: coords.longitude };
+        initialLocationRef.current = location;
+        mapRef.current?.flyTo({ center: [location.lon, location.lat], zoom: 16 });
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+    );
+  }, []);
   // Подсказки 2GIS ранжируются по близости к центру карты
   const getNear = (): LatLon => {
     const center = mapRef.current?.getCenter?.();
@@ -528,7 +544,7 @@ export default function App() {
         </section>
 
         <section className="map-area" aria-label="Интерактивная карта">
-          <MapboxMap selected={selected} styleName={mapLayer} locationActive={locationActive} route={mapRoute} onMapClick={pickMapPoint} onMapReady={(map) => { mapRef.current = map; (window as any).__seewayMap = map; }} />
+          <MapboxMap selected={selected} styleName={mapLayer} locationActive={locationActive} route={mapRoute} onMapClick={pickMapPoint} onMapReady={(map) => { mapRef.current = map; (window as any).__seewayMap = map; const location = initialLocationRef.current; if (location) map.flyTo({ center: [location.lon, location.lat], zoom: 16 }); }} />
           {!import.meta.env.VITE_MAPBOX_ACCESS_TOKEN && <div className="map-notice">Добавьте VITE_MAPBOX_ACCESS_TOKEN в Frontend/.env</div>}
           <div className="map-caption">SeeWay <span>{apiState === "ready" ? "Данные API" : apiState === "loading" ? "Загрузка зданий…" : "Демо-данные · API недоступен"}</span></div>
           <div className="map-top-controls">
