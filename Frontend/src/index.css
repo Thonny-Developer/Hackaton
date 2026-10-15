@@ -698,6 +698,37 @@ body { background: var(--sw-warm); }
 }
 .route-fab:hover, .button:hover, .welcome-primary:hover, .sos-submit:hover { background: #364656; transform: translateY(-2px); box-shadow: 0 16px 32px rgba(54, 70, 86, .25); }
 .route-fab:active, .button:active, .welcome-primary:active, .sos-submit:active { transform: translateY(0) scale(.99); box-shadow: 0 7px 16px rgba(54, 70, 86, .2); }
+
+/* Turn-by-turn navigator: a focused surface that appears only after a route exists. */
+.navigator-nav-item { color: var(--sw-slate); }
+.navigator-panel { padding: 17px; overflow: auto; }
+.navigator-route-meta { display: flex; gap: 7px; margin: -5px 0 15px; color: var(--sw-blue); font-size: 11px; font-weight: 750; }
+.navigator-route-meta span { border: 1px solid var(--sw-border); border-radius: 999px; background: rgba(241,237,230,.52); padding: 5px 9px; }
+.navigator-progress { height: 5px; overflow: hidden; border-radius: 999px; background: rgba(124,154,162,.17); }
+.navigator-progress span { display: block; height: 100%; border-radius: inherit; background: var(--sw-slate); transition: width .25s ease; }
+.navigator-next-step { display: flex; gap: 13px; align-items: flex-start; margin: 16px 0 12px; border: 1px solid rgba(124,154,162,.22); border-radius: 22px; background: rgba(124,154,162,.12); padding: 15px; }
+.navigator-turn-icon { width: 50px; height: 50px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 16px; background: var(--sw-slate); color: var(--sw-warm); }
+.navigator-next-step > div:last-child { min-width: 0; }
+.navigator-kicker { display: block; margin-bottom: 4px; color: var(--sw-blue); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.navigator-next-step strong { display: block; font-size: 18px; line-height: 1.18; letter-spacing: -.02em; }
+.navigator-next-step small { display: block; margin-top: 6px; color: var(--sw-blue); font-size: 12px; }
+.navigator-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+.navigator-controls button { min-height: 42px; }
+.navigator-controls button:disabled { cursor: not-allowed; opacity: .45; }
+.navigator-list { display: grid; gap: 4px; border-top: 1px solid rgba(124,154,162,.16); padding-top: 9px; }
+.navigator-step { display: grid; grid-template-columns: 27px 1fr; gap: 9px; align-items: start; width: 100%; border: 0; border-radius: 14px; background: transparent; padding: 10px 8px; text-align: left; cursor: pointer; }
+.navigator-step:hover, .navigator-step.active { background: rgba(124,154,162,.12); }
+.navigator-step-index { width: 25px; height: 25px; display: grid; place-items: center; border: 1px solid var(--sw-border); border-radius: 50%; color: var(--sw-blue); font-size: 10px; font-weight: 800; }
+.navigator-step.active .navigator-step-index { border-color: var(--sw-slate); background: var(--sw-slate); color: var(--sw-warm); }
+.navigator-step strong, .navigator-step small { display: block; }
+.navigator-step strong { font-size: 12px; line-height: 1.3; }
+.navigator-step small { margin-top: 3px; color: var(--sw-blue); font-size: 10px; }
+.navigator-empty { display: grid; justify-items: center; gap: 8px; margin: 22px 0; border: 1px dashed var(--sw-border); border-radius: 20px; padding: 24px 16px; text-align: center; }
+.navigator-empty p { margin: 0; color: var(--sw-blue); font-size: 11px; }
+@media (max-width: 900px) {
+  .navigator-panel { padding-bottom: 26px; }
+  .navigator-next-step strong { font-size: 17px; }
+}
 .outline-button, .report-button, .issue-chips button {
   border-color: var(--sw-border);
   border-radius: 20px;

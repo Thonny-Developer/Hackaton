@@ -164,6 +164,8 @@ function Icon({ name, size = 20 }: { name: string; size?: number }) {
     search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
     filter: <path d="M4 6h16M7 12h10M10 18h4"/>,
     route: <><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M8 18h3a3 3 0 0 0 3-3V9a3 3 0 0 1 3-3"/></>,
+    navigation: <><path d="m12 3 7 18-7-4-7 4Z"/><path d="m12 3 0 14"/></>,
+    finish: <><path d="M5 21V4"/><path d="m5 5 12 3-12 3Z"/><path d="M5 20h14"/></>,
     close: <path d="m6 6 12 12M18 6 6 18"/>,
     chevron: <path d="m9 18 6-6-6-6"/>,
     report: <><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.8 2.5 18a2 2 0 0 0 1.8 3h15.4a2 2 0 0 0 1.8-3L13.7 3.8a2 2 0 0 0-3.4 0Z"/></>,
@@ -281,6 +283,8 @@ export default function App() {
   const [routeFromText, setRouteFromText] = useState(MY_LOCATION.title);
   const [routeToText, setRouteToText] = useState("");
   const [routeResult, setRouteResult] = useState<{ route: OutdoorRoute; notices: string[] } | null>(null);
+  const [navigatorOpen, setNavigatorOpen] = useState(false);
+  const [navigatorStep, setNavigatorStep] = useState(0);
   const [mapRoute, setMapRoute] = useState<MapRoute | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
@@ -375,6 +379,8 @@ export default function App() {
     setRouteResult(null);
     setMapRoute(null);
     setRouteError(null);
+    setNavigatorOpen(false);
+    setNavigatorStep(0);
   };
 
   const openPlace = (place: Place) => {
@@ -392,6 +398,7 @@ export default function App() {
   };
 
   const openRoutePanel = () => {
+    setNavigatorOpen(false);
     setRoutePanel(true);
     setRouteToText(selected?.name || "");
   };
@@ -426,6 +433,8 @@ export default function App() {
       // 2GIS умеет исключать лестницы, остальные параметры уличный маршрут не учитывает
       const result = await fetchOutdoorRoute(from, to, prefs.includes("noSteps") ? "no_stairs" : "default");
       setRouteResult(result);
+      setNavigatorStep(0);
+      setNavigatorOpen(false);
       setMapRoute({ geometry: result.route.geometry, from, to });
     } catch (e) {
       setRouteError(e instanceof Error ? e.message : "Не удалось построить маршрут");
@@ -465,8 +474,9 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand"><SeeWayLogo compact /></div>
         <nav aria-label="Основная навигация">
-          <button className={!routePanel ? "nav-item active" : "nav-item"} onClick={() => { setFavoritesOnly(false); closeDetail(); }}><Icon name="pin" /><span>Карта</span></button>
+          <button className={!routePanel && !navigatorOpen ? "nav-item active" : "nav-item"} onClick={() => { setFavoritesOnly(false); closeDetail(); }}><Icon name="pin" /><span>Карта</span></button>
           <button className={routePanel ? "nav-item active" : "nav-item"} onClick={() => { setFavoritesOnly(false); openRoutePanel(); }}><Icon name="route" /><span>Маршрут</span></button>
+          {routeResult && <button className={navigatorOpen ? "nav-item active navigator-nav-item" : "nav-item navigator-nav-item"} onClick={() => { setFavoritesOnly(false); setNavigatorOpen(true); setRoutePanel(false); setSheetOpen(true); }}><Icon name="navigation" /><span>Навигатор</span></button>}
           <button className="nav-item sos-nav-item" onClick={() => { setSosOpen(true); setSosSent(false); }}><span className="sos-nav-icon">SOS</span><span>SOS</span></button>
           <button className="nav-item" onClick={() => user ? setAuthView("profile") : setProfileMenu(!profileMenu)}><Icon name="user" /><span>Профиль</span></button>
         </nav>
@@ -508,6 +518,25 @@ export default function App() {
                 {routeResult.route.steps.length > 0 && <ol className="route-steps">{routeResult.route.steps.map((step, i) => <li key={i}>{step.text}{step.distance_m > 0 && !HAS_DISTANCE.test(step.text) && <small>{formatDistance(step.distance_m)}</small>}</li>)}</ol>}
               </div>}
               {routeError && <div className="route-alert" role="alert"><Icon name="info" size={18} /><div><strong>Маршрут не построен</strong><p>{routeError}</p></div></div>}
+            </div>
+          ) : navigatorOpen && routeResult ? (
+            <div className="navigator-panel">
+              <div className="panel-title-row"><div><p className="eyebrow">РЕЖИМ НАВИГАЦИИ</p><h1>Навигатор</h1></div><button className="plain-icon" onClick={() => setNavigatorOpen(false)} aria-label="Закрыть навигатор"><Icon name="close" /></button></div>
+              <div className="navigator-route-meta"><span>{formatDistance(routeResult.route.distance_m)}</span><span>{formatDuration(routeResult.route.duration_s)}</span><span>{routeResult.route.provider === "2gis" ? "2ГИС" : "маршрут"}</span></div>
+              {(() => {
+                const steps = routeResult.route.steps;
+                const current = steps[navigatorStep];
+                const progress = steps.length ? ((navigatorStep + 1) / steps.length) * 100 : 100;
+                return <>
+                  <div className="navigator-progress" aria-label={`Шаг ${Math.min(navigatorStep + 1, steps.length)} из ${steps.length}`}><span style={{ width: `${progress}%` }} /></div>
+                  {current ? <div className="navigator-next-step">
+                    <div className="navigator-turn-icon"><Icon name={navigatorStep === steps.length - 1 ? "finish" : "navigation"} size={28} /></div>
+                    <div><span className="navigator-kicker">{navigatorStep === 0 ? "Начните движение" : navigatorStep === steps.length - 1 ? "Вы прибыли" : "Следующий манёвр"}</span><strong>{current.text}</strong><small>{current.distance_m > 0 ? `через ${formatDistance(current.distance_m)}` : "Продолжайте по маршруту"}</small></div>
+                  </div> : <div className="navigator-empty"><Icon name="route" size={24} /><strong>Маршрут готов</strong><p>Пошаговые инструкции не пришли от сервиса.</p></div>}
+                  <div className="navigator-controls"><button className="outline-button" disabled={navigatorStep === 0} onClick={() => setNavigatorStep((step) => Math.max(0, step - 1))}>Назад</button><button className="button" disabled={!steps.length || navigatorStep >= steps.length - 1} onClick={() => setNavigatorStep((step) => Math.min(steps.length - 1, step + 1))}>{navigatorStep >= steps.length - 1 ? "Финиш" : "Дальше"}</button></div>
+                  <div className="navigator-list" aria-label="Все шаги маршрута">{steps.map((step, index) => <button key={`${step.text}-${index}`} className={index === navigatorStep ? "navigator-step active" : "navigator-step"} onClick={() => setNavigatorStep(index)}><span className="navigator-step-index">{index + 1}</span><span><strong>{step.text}</strong><small>{step.distance_m > 0 ? formatDistance(step.distance_m) : ""}</small></span></button>)}</div>
+                </>;
+              })()}
             </div>
           ) : (
             <div className="panel-scroll">
