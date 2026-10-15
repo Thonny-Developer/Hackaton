@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-export const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000").replace(/\/$/, "");
+// Пусто = API на том же адресе, что и сайт (в проде Caddy, в dev прокси Vite)
+export const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
 export type LatLon = { lat: number; lon: number };
 export type AddressSuggestion = { id: string; type: string; name: string; address: string | null; lat: number; lon: number };
@@ -63,6 +64,14 @@ export function useAddressSuggestions(query: string, getNear: () => LatLon, enab
   }, [q, enabled]);
 
   return { items, loading, error };
+}
+
+/** Что находится в точке на карте. null, если 2GIS там ничего не знает. */
+export async function fetchReverse(point: LatLon): Promise<AddressSuggestion | null> {
+  const params = new URLSearchParams({ lat: point.lat.toFixed(6), lon: point.lon.toFixed(6), lang: "ru" });
+  const response = await fetch(`${API_BASE}/api/v1/geo/reverse?${params}`);
+  if (!response.ok) throw new Error(await errorText(response));
+  return response.json();
 }
 
 export async function fetchOutdoorRoute(from: LatLon, to: LatLon, profile: RouteProfile) {

@@ -22,6 +22,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 DGIS_CATALOG = "https://catalog.api.2gis.com/3.0/items"
 DGIS_SUGGEST = "https://catalog.api.2gis.com/3.0/suggests"
+DGIS_GEOCODE = "https://catalog.api.2gis.com/3.0/items/geocode"
 DGIS_ROUTING = "https://routing.api.2gis.com/routing/7.0.0/global"
 ORS_WHEELCHAIR = "https://api.openrouteservice.org/v2/directions/wheelchair/geojson"
 
@@ -191,6 +192,24 @@ async def dgis_suggest(q: str, lat: float | None, lon: float | None, locale: str
         seen.add(dedup)
         found.append(Suggestion(id=str(it["id"]), type=it.get("type") or "", name=name,
                                 address=_suggest_address(it, name), lat=point["lat"], lon=point["lon"]))
+    _cache.set(cache_key, found)
+    return found
+
+
+async def dgis_reverse(lat: float, lon: float, locale: str) -> Suggestion | None:
+    """Что находится в точке клика: здание с адресом, иначе улица или район.
+    Координаты остаются те, куда кликнули, а не центр найденного объекта."""
+    cache_key = ("reverse", round(lat, 5), round(lon, 5), locale)
+    if (hit := _cache.get(cache_key)) is not None:
+        return hit
+    params = {"lat": lat, "lon": lon, "fields": "items.point,items.address", "locale": locale, "key": _dgis_key()}
+    items = [it for it in await _dgis_items(DGIS_GEOCODE, params) if it.get("id")]
+    found = None
+    if items:
+        it = items[0]
+        name = it.get("name") or it.get("full_name") or "Точка на карте"
+        found = Suggestion(id=str(it["id"]), type=it.get("type") or "", name=name,
+                           address=_suggest_address(it, name), lat=lat, lon=lon)
     _cache.set(cache_key, found)
     return found
 

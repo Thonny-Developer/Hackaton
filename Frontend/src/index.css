@@ -1,5 +1,4 @@
 @import 'tailwindcss';
-@import url('https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.css');
 
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -1041,3 +1040,7 @@ body { background: var(--sw-warm); }
   .suggest-heading { font-size: 10px; }
   .route-steps { font-size: 13px; }
 }
+
+/* Подсказка про выбор точки кликом по карте в панели маршрута */
+.route-hint { margin: 8px 2px 0; color: #7C9AA2; font-size: 11px; }
+.mapbox-canvas .mapboxgl-canvas { cursor: crosshair; }

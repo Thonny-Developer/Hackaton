@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import AddressInput, { type AddressOption } from "./AddressInput";
-import { API_BASE, DEFAULT_CENTER, type AddressSuggestion, type LatLon, type OutdoorRoute, currentPosition, fetchOutdoorRoute, formatDistance, formatDuration, useAddressSuggestions } from "./geo";
+import { API_BASE, DEFAULT_CENTER, type AddressSuggestion, type LatLon, type OutdoorRoute, currentPosition, fetchOutdoorRoute, fetchReverse, formatDistance, formatDuration, useAddressSuggestions } from "./geo";
 import MapboxMap, { type MapRoute } from "./MapboxMap";
 import { type ApiBuilding, type ApiReport, type ApiUser, PASSWORD_MIN, addFavorite, forgotPassword, getFavorites, getMe, getMyReports, getToken, login, register, removeFavorite, resetPassword, sendReport, setToken, updateMe } from "./api";
 
@@ -418,6 +418,32 @@ export default function App() {
     }
   };
 
+  // Клик по карте: сначала ставим точку с координатами, потом подписываем её адресом из 2GIS.
+  // В режиме маршрута точка становится «Откуда», если оно пустое, иначе «Куда».
+  const mapClickSeq = useRef(0);
+  const pickMapPoint = async (point: LatLon) => {
+    const seq = ++mapClickSeq.current;
+    const asStart = routePanel && !routeFrom && !routeFromText.trim();
+    const coords = `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}`;
+    const apply = (name: string, address: string) => {
+      if (asStart) {
+        setRouteFrom({ key: `map-${seq}`, title: name, subtitle: address, kind: "2gis", lat: point.lat, lon: point.lon });
+        setRouteFromText(name);
+        resetRoute();
+      } else if (routePanel) {
+        setSelected(addressPlace(name, address, point.lat, point.lon));
+        setRouteToText(name);
+        resetRoute();
+      } else {
+        openPlace(addressPlace(name, address, point.lat, point.lon));
+      }
+    };
+    apply("Точка на карте", coords);
+    const found = await fetchReverse(point).catch(() => null);
+    // Пока ждали 2GIS, пользователь мог кликнуть ещё раз
+    if (found && seq === mapClickSeq.current) apply(found.name, found.address || coords);
+  };
+
   const mapPlaces = selectedIsAddress ? [...visiblePlaces, selected] : visiblePlaces;
 
   return (
@@ -459,6 +485,7 @@ export default function App() {
                 onChange={(text) => { setRouteToText(text); setSelected(null); resetRoute(); }}
                 onPick={(option) => { setSelected(optionToPlace(option)); setRouteToText(option.title); resetRoute(); }}
               />
+              <p className="route-hint">Или нажмите на карту, чтобы поставить точку</p>
               <h2 className="panel-section-title">Параметры доступности</h2>
               {[["noSteps", "Без лестниц"], ["elevator", "Предпочитать лифты"], ["wide", "Избегать узких проходов"], ["ramp", "Предпочитать пандусы"]].map(([id, label]) => <label className="compact-filter" key={id}><input type="checkbox" checked={prefs.includes(id)} onChange={() => toggleItem(id, prefs, setPrefs)} /><span>{label}</span></label>)}
               <button className="button full route-build-button" onClick={buildRoute} disabled={routeLoading}>{routeLoading ? "Строим маршрут…" : "Показать маршрут"}</button>
@@ -503,8 +530,8 @@ export default function App() {
         </section>
 
         <section className="map-area" aria-label="Интерактивная карта">
-          <MapboxMap places={mapPlaces} selected={selected} onSelect={openPlace} styleName={mapLayer} locationActive={locationActive} route={mapRoute} onMapReady={(map) => { mapRef.current = map; (window as any).__seewayMap = map; }} />
-          {!import.meta.env.VITE_MAPBOX_ACCESS_TOKEN && <div className="map-notice">Добавьте VITE_MAPBOX_ACCESS_TOKEN в Frontend/.env</div>}
+          <MapboxMap places={mapPlaces} selected={selected} onSelect={openPlace} styleName={mapLayer} locationActive={locationActive} route={mapRoute} onMapClick={pickMapPoint} onMapReady={(map) => { mapRef.current = map; (window as any).__seewayMap = map; }} />
+          {!import.meta.env.VITE_MAPBOX_ACCESS_TOKEN && <div className="map-notice">Добавьте VITE_MAPBOX_ACCESS_TOKEN в .env в корне проекта</div>}
           <div className="map-caption">SeeWay <span>{apiState === "ready" ? "Данные API" : apiState === "loading" ? "Загрузка зданий…" : "Демо-данные · API недоступен"}</span></div>
           <div className="map-top-controls">
             <div className="layer-control"><button onClick={() => setLayersOpen(!layersOpen)}><Icon name="map" size={18} />{mapLayer}</button>{layersOpen && <div><button onClick={() => { setMapLayer("Схема"); setLayersOpen(false); }}>Схема</button><button onClick={() => { setMapLayer("Спутник"); setLayersOpen(false); }}>Спутник</button><button onClick={() => { setMapLayer("Контрастная"); setLayersOpen(false); }}>Контрастная</button></div>}</div>
@@ -526,7 +553,7 @@ export default function App() {
                 <div><small>ВХОД</small><strong>{selected.entrance || "Не подтверждён"}</strong></div>
                 <div><small>ОБНОВЛЕНО</small><strong>{selected.updated}</strong></div>
               </div>
-              <div className="detail-actions three-actions"><button className="outline-button" onClick={() => setDetailExpanded(!detailExpanded)}>{detailExpanded ? "Свернуть" : "Подробнее"}</button>{selectedIsFromApi && <button className={`outline-button ${favorites.includes(selected.id) ? "saved-action" : ""}`} onClick={() => toggleFavorite(selected.id)}><Icon name="heart" size={16} />{favorites.includes(selected.id) ? "Сохранено" : "В избранное"}</button>}<button className="button route-card-button" onClick={openRoutePanel}><Icon name="route" size={16} />Построить маршрут</button></div>
+              <div className="detail-actions three-actions"><button className="outline-button" onClick={() => setDetailExpanded(!detailExpanded)}>{detailExpanded ? "Свернуть" : "Подробнее"}</button>{selectedIsFromApi && <button className={`outline-button ${favorites.includes(selected.id) ? "saved-action" : ""}`} onClick={() => toggleFavorite(selected.id)}><Icon name="heart" size={16} />{favorites.includes(selected.id) ? "Сохранено" : "В избранное"}</button>}<button className="button route-card-button" onClick={() => { openRoutePanel(); buildRoute(); }}><Icon name="route" size={16} />Построить маршрут</button></div>
               {detailExpanded && (selectedIsFromApi || selectedIsAddress ? <div className="profile-content"><p>В API пока нет паспорта доступности для этого здания. Сведения о пандусах, лифтах и входах не указаны.</p>
                   {selectedIsFromApi && <button className="report-button" onClick={() => { setReportOpen(true); setReportSent(false); setReportError(null); }}><Icon name="report" size={18} />Сообщить об изменении</button>}
                 </div> : <div className="profile-content">

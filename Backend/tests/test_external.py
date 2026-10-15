@@ -20,6 +20,15 @@ SUGGEST_BODY = {
     ]},
 }
 
+GEOCODE_BODY = {
+    "meta": {"code": 200},
+    "result": {"items": [
+        {"type": "building", "id": "9", "name": "Байтерек", "full_name": "Астана, Байтерек",
+         "address_name": "бульвар Нуржол, 14", "point": {"lat": 51.128301, "lon": 71.430456}},
+        {"type": "adm_div", "id": "10", "name": "Есиль", "point": {"lat": 51.05, "lon": 71.46}},
+    ]},
+}
+
 ROUTE_BODY = {
     "status": "OK",
     "result": [{
@@ -45,7 +54,8 @@ def fake_2gis(monkeypatch):
 
     def handler(request: httpx.Request) -> httpx.Response:
         sent.append(request)
-        body = SUGGEST_BODY if request.url.path.endswith("/suggests") else ROUTE_BODY
+        path = request.url.path
+        body = SUGGEST_BODY if path.endswith("/suggests") else GEOCODE_BODY if path.endswith("/geocode") else ROUTE_BODY
         return httpx.Response(200, json=body)
 
     monkeypatch.setattr(get_settings(), "dgis_api_key", "test-key")
@@ -61,6 +71,12 @@ async def test_suggest_keeps_only_items_with_point(fake_2gis):
     assert items[0].address == "Астана, проспект Мангилик Ел, 55/1"
     assert items[1].address == "проспект Туран, 37"
     assert fake_2gis[0].url.params["location"] == "71.41,51.09"
+
+
+async def test_reverse_keeps_clicked_point(fake_2gis):
+    found = await external.dgis_reverse(51.1283, 71.4305, "ru_KZ")
+    assert found.name == "Байтерек" and found.address == "бульвар Нуржол, 14"
+    assert (found.lat, found.lon) == (51.1283, 71.4305)
 
 
 async def test_walk_route_geometry_and_steps(fake_2gis):

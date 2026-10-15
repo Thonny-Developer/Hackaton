@@ -3,7 +3,7 @@ import type { LatLon } from "./geo";
 
 type MapPlace = { id: number; name: string; type: string; address: string; state: string; lon?: number | null; lat?: number | null };
 export type MapRoute = { geometry: [number, number][]; from: LatLon; to: LatLon };
-type Props = { places: MapPlace[]; selected: MapPlace | null; onSelect: (place: any) => void; styleName: string; locationActive: boolean; route?: MapRoute | null; onMapReady?: (map: any) => void };
+type Props = { places: MapPlace[]; selected: MapPlace | null; onSelect: (place: any) => void; styleName: string; locationActive: boolean; route?: MapRoute | null; onMapReady?: (map: any) => void; onMapClick?: (point: LatLon) => void };
 
 declare global { interface Window { mapboxgl?: any } }
 const TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined;
@@ -40,7 +40,7 @@ function routeMarker(kind: "start" | "finish", label: string) {
   return el;
 }
 
-export default function MapboxMap({ places, selected, onSelect, styleName, locationActive, route, onMapReady }: Props) {
+export default function MapboxMap({ places, selected, onSelect, styleName, locationActive, route, onMapReady, onMapClick }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markers = useRef<Map<number, any>>(new Map());
@@ -48,7 +48,9 @@ export default function MapboxMap({ places, selected, onSelect, styleName, locat
   const didInitialFit = useRef(false);
   const routeRef = useRef(route);
   const routeMarkers = useRef<any[]>([]);
+  const onMapClickRef = useRef(onMapClick);
   onSelectRef.current = onSelect;
+  onMapClickRef.current = onMapClick;
   routeRef.current = route;
 
   useEffect(() => {
@@ -60,6 +62,11 @@ export default function MapboxMap({ places, selected, onSelect, styleName, locat
       const map = new mapbox.Map({ container: host.current, style: styleName === "Спутник" ? "mapbox://styles/mapbox/satellite-streets-v12" : styleName === "Контрастная" ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/streets-v12", center: [71.4181, 51.09085], zoom: 14.4, attributionControl: true });
       map.addControl(new mapbox.NavigationControl({ showCompass: false }), "bottom-right");
       map.on("style.load", () => drawRoute(map, routeRef.current));
+      map.on("click", (e: any) => {
+        // Клик по маркеру здания обрабатывает сам маркер
+        if ((e.originalEvent?.target as HTMLElement | null)?.closest(".mapboxgl-marker")) return;
+        onMapClickRef.current?.({ lat: e.lngLat.lat, lon: e.lngLat.lng });
+      });
       mapRef.current = map;
       onMapReady?.(map);
     }).catch((error) => console.error(error));

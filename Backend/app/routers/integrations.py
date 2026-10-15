@@ -135,6 +135,20 @@ async def geo_suggest(request: Request, q: Annotated[str, Query(min_length=2, ma
     return [SuggestionOut(**it.__dict__) for it in found]
 
 
+@router.get("/geo/reverse", response_model=SuggestionOut | None,
+            summary="Адрес точки на карте (2GIS), для клика по карте")
+@limiter.limit(_s.rate_limit_search)
+async def geo_reverse(request: Request, lat: Lat, lon: Lon, lang: LangQuery = "ru"):
+    """`null`, если в точке ничего не нашлось (например, в поле за городом)."""
+    if not _s.dgis_api_key:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Адреса отключены: нет ключа 2GIS")
+    try:
+        found = await external.dgis_reverse(lat, lon, DGIS_LOCALES[normalize_lang(lang)])
+    except external.ExternalError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from None
+    return SuggestionOut(**found.__dict__) if found else None
+
+
 def _outdoor_out(r: external.OutdoorRoute) -> OutdoorOut:
     return OutdoorOut(provider=r.provider, accessibility_checked=r.accessibility_checked,
                       distance_m=round(r.distance_m, 1), duration_s=round(r.duration_s),
