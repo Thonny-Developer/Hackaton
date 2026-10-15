@@ -320,7 +320,7 @@ export default function App() {
         </section>
 
         <section className="map-area" aria-label="Интерактивная карта">
-          <MapboxMap places={visiblePlaces} selected={selected} onSelect={openPlace} styleName={mapLayer} locationActive={locationActive} onMapReady={(map) => { (window as any).__seewayMap = map; }} />
+          <MapboxMap styleName={mapLayer} locationActive={locationActive} onMapReady={(map) => { (window as any).__seewayMap = map; }} />
           {!import.meta.env.VITE_MAPBOX_ACCESS_TOKEN && <div className="map-notice">Добавьте VITE_MAPBOX_ACCESS_TOKEN в Frontend/.env</div>}
           <div className="map-caption">SeeWay <span>{apiState === "ready" ? "Данные API" : apiState === "loading" ? "Загрузка зданий…" : "Демо-данные · API недоступен"}</span></div>
           <div className="map-top-controls">

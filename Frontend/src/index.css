@@ -677,13 +677,6 @@ body { background: var(--sw-warm); }
 .mapbox-canvas { position: absolute; inset: 0; width: 100%; height: 100%; background: #e9e6df; }
 .mapbox-canvas .mapboxgl-ctrl-bottom-right { bottom: 20px; right: 18px; }
 .mapbox-canvas .mapboxgl-ctrl-group { border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px #26374620; }
-.mapbox-place-marker { width: 34px; height: 40px; border: 2px solid #fff; border-radius: 50% 50% 50% 5px; transform: rotate(-45deg); background: #b77751; box-shadow: 0 3px 10px #24374640; cursor: pointer; transition: transform .16s ease; }
-.mapbox-place-marker span { display: block; width: 9px; height: 9px; margin: auto; border-radius: 50%; background: #fff; }
-.mapbox-place-marker.marker-accessible { background: #2f806b; }
-.mapbox-place-marker.marker-partial { background: #d79b39; }
-.mapbox-place-marker.marker-barrier { background: #c6534d; }
-.mapbox-place-marker.marker-unknown { background: #758794; }
-.mapbox-place-marker:hover, .mapbox-place-marker.active { transform: rotate(-45deg) scale(1.15); z-index: 2; }
 .map-notice { position: absolute; z-index: 12; inset: auto auto 22px 22px; max-width: 330px; border-radius: 10px; background: #fff; padding: 12px 16px; color: #364656; font-size: 12px; box-shadow: 0 5px 20px #26374620; }
 .map-area { background: #e9e6df; }
 .mapboxgl-ctrl-attrib { font-size: 10px; }

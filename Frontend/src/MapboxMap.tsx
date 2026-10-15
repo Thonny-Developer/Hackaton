@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 
-type MapPlace = { id: number; name: string; type: string; address: string; state: string; lon?: number | null; lat?: number | null };
-type Props = { places: MapPlace[]; selected: MapPlace | null; onSelect: (place: any) => void; styleName: string; locationActive: boolean; onMapReady?: (map: any) => void };
+type Props = { styleName: string; locationActive: boolean; onMapReady?: (map: any) => void };
 
 declare global { interface Window { mapboxgl?: any } }
 const TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN as string | undefined;
@@ -17,13 +16,9 @@ function loadMapbox() {
   });
 }
 
-export default function MapboxMap({ places, selected, onSelect, styleName, locationActive, onMapReady }: Props) {
+export default function MapboxMap({ styleName, locationActive, onMapReady }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
-  const markers = useRef<Map<number, any>>(new Map());
-  const onSelectRef = useRef(onSelect);
-  const didInitialFit = useRef(false);
-  onSelectRef.current = onSelect;
 
   useEffect(() => {
     if (!host.current || !TOKEN) return;
@@ -36,39 +31,10 @@ export default function MapboxMap({ places, selected, onSelect, styleName, locat
       mapRef.current = map;
       onMapReady?.(map);
     }).catch((error) => console.error(error));
-    return () => { cancelled = true; markers.current.forEach((marker) => marker.remove()); markers.current.clear(); mapRef.current?.remove(); mapRef.current = null; };
+    return () => { cancelled = true; mapRef.current?.remove(); mapRef.current = null; };
     // Style is updated separately so map state and gestures persist.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [TOKEN]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !window.mapboxgl) return;
-    const active = new Set(places.map((place) => place.id));
-    markers.current.forEach((marker, id) => { if (!active.has(id)) { marker.remove(); markers.current.delete(id); } });
-    places.forEach((place) => {
-      if (place.lat == null || place.lon == null) return;
-      let marker = markers.current.get(place.id);
-      if (!marker) {
-        const el = document.createElement("button");
-        el.type = "button"; el.className = `mapbox-place-marker marker-${place.state}`; el.setAttribute("aria-label", place.name); el.innerHTML = "<span></span>";
-        el.addEventListener("click", () => onSelectRef.current(place));
-        marker = new window.mapboxgl.Marker({ element: el, anchor: "bottom" }).setLngLat([place.lon, place.lat]).addTo(map);
-        markers.current.set(place.id, marker);
-      } else marker.setLngLat([place.lon, place.lat]);
-      marker.getElement().classList.toggle("active", selected?.id === place.id);
-      marker.getElement().setAttribute("aria-label", `${place.name}, ${place.address}`);
-    });
-    if (!didInitialFit.current) {
-      const points = places.filter((place) => place.lat != null && place.lon != null);
-      if (points.length) {
-        const bounds = new window.mapboxgl.LngLatBounds();
-        points.forEach((place) => bounds.extend([place.lon, place.lat]));
-        map.fitBounds(bounds, { padding: 90, maxZoom: 15, duration: 0 });
-        didInitialFit.current = true;
-      }
-    }
-  }, [places, selected]);
 
   useEffect(() => {
     const map = mapRef.current;
