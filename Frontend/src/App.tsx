@@ -124,6 +124,15 @@ const routePrefs = [
   ["thresholds", "Минимум порогов"],
 ] as const;
 
+// Параметры в панели маршрута. 2GIS умеет учитывать только «Без лестниц»
+const routePlannerPrefs = [
+  ["noSteps", "Без лестниц"],
+  ["elevator", "Предпочитать лифты"],
+  ["wide", "Избегать узких проходов"],
+  ["ramp", "Предпочитать пандусы"],
+] as const;
+const APPLIED_ROUTE_PREFS = ["noSteps"];
+
 const buildingCategories = [
   ["Образование", "Колледжи и университеты"],
   ["Медицина", "Больницы и поликлиники"],
@@ -209,6 +218,104 @@ function WelcomeArchitecture() {
 
 function Status({ state }: { state: AccessState }) {
   return <span className={`status status-${state}`}><span className="status-dot" />{statusText[state]}</span>;
+}
+
+type NavigatorPanelProps = {
+  route: OutdoorRoute;
+  notices: string[];
+  step: number;
+  onStep: (step: number) => void;
+  destination: { name: string; address: string } | null;
+  origin: string;
+  prefs: string[];
+  located: boolean;
+  onExit: () => void;
+};
+
+function NavigatorPanel({ route, notices, step, onStep, destination, origin, prefs, located, onExit }: NavigatorPanelProps) {
+  // На телефоне панель стартует свёрнутой, чтобы не закрывать карту
+  const [detailsOpen, setDetailsOpen] = useState(() => !window.matchMedia("(max-width: 768px)").matches);
+  const steps = route.steps;
+  const current = steps[step];
+  const isLast = step >= steps.length - 1;
+  // Остаток считаем по длинам шагов, а если 2GIS их не прислал, по номеру шага
+  const stepsTotal = steps.reduce((sum, item) => sum + item.distance_m, 0);
+  const remainingRatio = stepsTotal > 0
+    ? steps.slice(step).reduce((sum, item) => sum + item.distance_m, 0) / stepsTotal
+    : steps.length ? 1 - step / steps.length : 1;
+  const remainingM = route.distance_m * remainingRatio;
+  const remainingS = route.duration_s * remainingRatio;
+  const arrival = new Date(Date.now() + remainingS * 1000).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  const provider = route.provider === "2gis" ? "2ГИС" : route.provider === "ors" ? "OpenRouteService" : "прямая линия";
+  const activePrefs = routePlannerPrefs.filter(([id]) => prefs.includes(id));
+
+  return <aside className="navigator-sheet" aria-label="Навигатор">
+    <header className="navigator-head">
+      <div>
+        <p className="eyebrow">РЕЖИМ НАВИГАЦИИ</p>
+        <h2>{destination?.name || "Точка назначения"}</h2>
+        <p>{destination?.address ? `${destination.address} · ` : ""}от «{origin || "начальной точки"}»</p>
+      </div>
+      <button className="close-button" onClick={onExit} aria-label="Завершить навигацию"><Icon name="close" size={18} /></button>
+    </header>
+
+    {current ? <div className="navigator-maneuver" aria-live="polite">
+      <div className="navigator-turn-icon"><Icon name={isLast ? "finish" : "navigation"} size={26} /></div>
+      <div>
+        <span className="navigator-kicker">{isLast ? "Вы у цели" : step === 0 ? "Начните движение" : "Следующий манёвр"}</span>
+        <strong>{current.text}</strong>
+        {current.distance_m > 0 && !HAS_DISTANCE.test(current.text) && <small>Участок {formatDistance(current.distance_m)}</small>}
+      </div>
+    </div> : <div className="navigator-empty"><Icon name="route" size={22} /><strong>Маршрут построен</strong><p>Сервис не прислал пошаговые подсказки, следуйте линии на карте.</p></div>}
+
+    <div className="navigator-stats">
+      <div><small>ОСТАЛОСЬ</small><strong>{formatDistance(remainingM)}</strong></div>
+      <div><small>В ПУТИ</small><strong>{formatDuration(remainingS)}</strong></div>
+      <div><small>ПРИБЫТИЕ</small><strong>{arrival}</strong></div>
+    </div>
+
+    <div className="navigator-progress-row">
+      <span>{steps.length ? `Шаг ${step + 1} из ${steps.length}` : "Без пошаговых подсказок"}</span>
+      <span className={located ? "navigator-live" : "navigator-live waiting"}><span className="navigator-live-dot" />{located ? "Вы в пути" : "Ищем вас…"}</span>
+    </div>
+    <div className="navigator-progress" role="progressbar" aria-label="Пройдено" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((1 - remainingRatio) * 100)}><span style={{ width: `${(1 - remainingRatio) * 100}%` }} /></div>
+
+    {steps.length > 0 && <div className="navigator-controls">
+      <button className="outline-button" disabled={step === 0} onClick={() => onStep(step - 1)}>Назад</button>
+      {isLast ? <button className="button" onClick={onExit}><Icon name="finish" size={16} />Завершить</button> : <button className="button" onClick={() => onStep(step + 1)}>Далее<Icon name="chevron" size={16} /></button>}
+    </div>}
+
+    <button className="navigator-details-toggle" onClick={() => setDetailsOpen(!detailsOpen)} aria-expanded={detailsOpen}>
+      <span>{detailsOpen ? "Скрыть подробности" : "Доступность и все шаги"}</span><Icon name="chevron" size={15} />
+    </button>
+
+    {detailsOpen && <div className="navigator-details">
+      <section className="navigator-access">
+        <h3>Доступность пути</h3>
+        <div className="navigator-chips">
+          {activePrefs.map(([id, label]) => APPLIED_ROUTE_PREFS.includes(id)
+            ? <span key={id} className="navigator-chip applied"><Icon name="check" size={13} />{label}</span>
+            : <span key={id} className="navigator-chip" title="Уличный маршрут пока не учитывает этот параметр">{label} · не учтено</span>)}
+          {!activePrefs.length && <span className="navigator-chip">Обычный пеший маршрут</span>}
+        </div>
+        <ul className="navigator-facts">
+          <li><Icon name="route" size={15} /><span>{formatDistance(route.distance_m)} · {formatDuration(route.duration_s)} пешком, данные: {provider}</span></li>
+          {route.accessibility_checked && <li><Icon name="check" size={15} /><span>Маршрут проверен на доступность</span></li>}
+          {notices.map((notice) => <li key={notice}><Icon name="info" size={15} /><span>{notice}</span></li>)}
+        </ul>
+      </section>
+
+      {steps.length > 0 && <section>
+        <h3>Все шаги</h3>
+        <ol className="navigator-list">{steps.map((item, index) => <li key={`${item.text}-${index}`}>
+          <button className={index === step ? "navigator-step active" : index < step ? "navigator-step done" : "navigator-step"} onClick={() => onStep(index)} aria-current={index === step ? "step" : undefined}>
+            <span className="navigator-step-index">{index < step ? <Icon name="check" size={12} /> : index + 1}</span>
+            <span><strong>{item.text}</strong>{item.distance_m > 0 && !HAS_DISTANCE.test(item.text) && <small>{formatDistance(item.distance_m)}</small>}</span>
+          </button>
+        </li>)}</ol>
+      </section>}
+    </div>}
+  </aside>;
 }
 
 export default function App() {
@@ -538,7 +645,7 @@ export default function App() {
               />
               <p className="route-hint">Или нажмите на карту, чтобы поставить точку</p>
               <h2 className="panel-section-title">Параметры доступности</h2>
-              {[["noSteps", "Без лестниц"], ["elevator", "Предпочитать лифты"], ["wide", "Избегать узких проходов"], ["ramp", "Предпочитать пандусы"]].map(([id, label]) => <label className="compact-filter" key={id}><input type="checkbox" checked={prefs.includes(id)} onChange={() => toggleItem(id, prefs, setPrefs)} /><span>{label}</span></label>)}
+              {routePlannerPrefs.map(([id, label]) => <label className="compact-filter" key={id}><input type="checkbox" checked={prefs.includes(id)} onChange={() => toggleItem(id, prefs, setPrefs)} /><span>{label}</span></label>)}
               <button className="button full route-build-button" onClick={buildRoute} disabled={routeLoading}>{routeLoading ? "Строим маршрут…" : "Показать маршрут"}</button>
               {routeResult && <div className="route-summary" aria-live="polite">
                 <div><strong>{formatDuration(routeResult.route.duration_s)}</strong><span>{formatDistance(routeResult.route.distance_m)} · пешком, данные 2GIS</span></div>
@@ -546,25 +653,6 @@ export default function App() {
                 {routeResult.route.steps.length > 0 && <ol className="route-steps">{routeResult.route.steps.map((step, i) => <li key={i}>{step.text}{step.distance_m > 0 && !HAS_DISTANCE.test(step.text) && <small>{formatDistance(step.distance_m)}</small>}</li>)}</ol>}
               </div>}
               {routeError && <div className="route-alert" role="alert"><Icon name="info" size={18} /><div><strong>Маршрут не построен</strong><p>{routeError}</p></div></div>}
-            </div>
-          ) : navigatorOpen && routeResult ? (
-            <div className="navigator-panel">
-              <div className="panel-title-row"><div><p className="eyebrow">РЕЖИМ НАВИГАЦИИ</p><h1>Навигатор</h1></div><button className="plain-icon" onClick={() => setNavigatorOpen(false)} aria-label="Закрыть навигатор"><Icon name="close" /></button></div>
-              <div className="navigator-route-meta"><span>{formatDistance(routeResult.route.distance_m)}</span><span>{formatDuration(routeResult.route.duration_s)}</span><span>{routeResult.route.provider === "2gis" ? "2ГИС" : "маршрут"}</span></div>
-              {(() => {
-                const steps = routeResult.route.steps;
-                const current = steps[navigatorStep];
-                const progress = steps.length ? ((navigatorStep + 1) / steps.length) * 100 : 100;
-                return <>
-                  <div className="navigator-progress" aria-label={`Шаг ${Math.min(navigatorStep + 1, steps.length)} из ${steps.length}`}><span style={{ width: `${progress}%` }} /></div>
-                  {current ? <div className="navigator-next-step">
-                    <div className="navigator-turn-icon"><Icon name={navigatorStep === steps.length - 1 ? "finish" : "navigation"} size={28} /></div>
-                    <div><span className="navigator-kicker">{navigatorStep === 0 ? "Начните движение" : navigatorStep === steps.length - 1 ? "Вы прибыли" : "Следующий манёвр"}</span><strong>{current.text}</strong><small>{current.distance_m > 0 ? `через ${formatDistance(current.distance_m)}` : "Продолжайте по маршруту"}</small></div>
-                  </div> : <div className="navigator-empty"><Icon name="route" size={24} /><strong>Маршрут готов</strong><p>Пошаговые инструкции не пришли от сервиса.</p></div>}
-                  <div className="navigator-controls"><button className="outline-button" disabled={navigatorStep === 0} onClick={() => setNavigatorStep((step) => Math.max(0, step - 1))}>Назад</button><button className="button" disabled={!steps.length || navigatorStep >= steps.length - 1} onClick={() => setNavigatorStep((step) => Math.min(steps.length - 1, step + 1))}>{navigatorStep >= steps.length - 1 ? "Финиш" : "Дальше"}</button></div>
-                  <div className="navigator-list" aria-label="Все шаги маршрута">{steps.map((step, index) => <button key={`${step.text}-${index}`} className={index === navigatorStep ? "navigator-step active" : "navigator-step"} onClick={() => setNavigatorStep(index)}><span className="navigator-step-index">{index + 1}</span><span><strong>{step.text}</strong><small>{step.distance_m > 0 ? formatDistance(step.distance_m) : ""}</small></span></button>)}</div>
-                </>;
-              })()}
             </div>
           ) : (
             <div className="panel-scroll">
@@ -611,9 +699,18 @@ export default function App() {
           {!selected && <button className="route-fab" onClick={openRoutePanel}><Icon name="route" />Построить маршрут</button>}
 
           {navigatorOpen && routeResult && <div className="navigator-map-ui" aria-label="Режим движения по маршруту">
-            <div className="navigator-live-card"><span className="navigator-live-dot" />{navigationPosition ? "Вы в пути" : "Определяем местоположение…"}<small>{routeResult.route.steps[navigatorStep]?.text || "Маршрут построен"}</small></div>
             <div className="navigator-user-arrow" aria-hidden="true" style={{ "--nav-heading": `${navigationHeading}deg` } as React.CSSProperties}><span><Icon name="navigation" size={31} /></span></div>
-            <div className="navigator-map-bottom"><span>{navigatorStep + 1} из {routeResult.route.steps.length || 1}</span><div><button disabled={navigatorStep >= routeResult.route.steps.length - 1} onClick={() => setNavigatorStep((step) => Math.min(routeResult.route.steps.length - 1, step + 1))}>Далее</button><button onClick={() => setNavigatorOpen(false)}>Выйти</button></div></div>
+            <NavigatorPanel
+              route={routeResult.route}
+              notices={routeResult.notices}
+              step={navigatorStep}
+              onStep={(step) => setNavigatorStep(Math.max(0, Math.min(routeResult.route.steps.length - 1, step)))}
+              destination={selected ? { name: selected.name, address: selected.address } : null}
+              origin={routeFromText}
+              prefs={prefs}
+              located={navigationPosition != null}
+              onExit={() => setNavigatorOpen(false)}
+            />
           </div>}
 
           {selected && !routePanel && (

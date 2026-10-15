@@ -135,7 +135,9 @@ export default function MapboxMap({ styleName, locationActive, selected, route, 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !navigationPosition) return;
-    map.easeTo({ center: [navigationPosition.lon, navigationPosition.lat], duration: 700, zoom: Math.max(map.getZoom(), 16) });
+    // На телефоне стрелка стоит выше центра (снизу шторка навигатора), смещаем карту так же
+    const offsetY = window.matchMedia("(max-width: 768px)").matches ? -map.getContainer().clientHeight * 0.18 : 0;
+    map.easeTo({ center: [navigationPosition.lon, navigationPosition.lat], offset: [0, offsetY], duration: 700, zoom: Math.max(map.getZoom(), 16) });
   }, [navigationPosition]);
 
   return <div className="mapbox-canvas" ref={host} aria-label="Карта Mapbox" />;
